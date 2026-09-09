@@ -15,12 +15,18 @@ prompt). COM ports and timings come from `magnet_embed/config.yaml`.
 
 from __future__ import annotations
 
-import argparse
-import logging
 import sys
 
-from . import entry
-from .config import load_config
+if __package__ in (None, ""):  # run as a bare script (e.g. from an IDE), not `python -m`
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+import argparse
+import logging
+
+from magnet_embed import entry
+from magnet_embed.config import load_config
 
 
 def main(argv: list[str] | None = None) -> int:

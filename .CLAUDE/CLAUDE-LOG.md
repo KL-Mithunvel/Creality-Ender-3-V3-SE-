@@ -414,3 +414,11 @@
 **Phase 1.6 done.** Remaining for the magnet flow is hardware: build the applicator,
 wire the Uno + write `dispenser_fw/`, measure `magnet_tool_offset`, run the manual
 smoke test.
+
+### Fix — entry files must run as bare scripts (IDE "Run file")
+
+- `python magnet_embed/main.py` (as opposed to `python -m magnet_embed.main`)
+  raised `ImportError: attempted relative import with no known parent package`.
+  Added a `__package__ in (None, "")` sys.path bootstrap + switched the three
+  `magnet_embed/main*.py` to absolute imports. `tests/test_entrypoints_as_scripts.py`
+  runs all four entry files with `--help` via subprocess. 174 tests.
