@@ -283,3 +283,30 @@
   out at that moment, not a code issue (the earlier `printer_serial --ping` on COM3
   succeeded). Re-check the USB link before a real run.
 
+### C8 — `main` runs without the Arduino ✅ (105 tests)
+
+- `Controller(..., dispenser_optional=True)`: a `DispenserError` from
+  `dispenser.connect()` is caught → `log` event, `self.dispenser = None`, no raise.
+  Default `False` unchanged.
+- `main.py`: `_build(with_dispenser=…)`, `--no-dispenser` flag, `--ping` prints
+  `dispenser SKIPPED` when off; GUI path uses `dispenser_optional=True` and only
+  `PrinterConnectionError` is fatal. So `python -m magnet_embed.main` starts today
+  with the Uno absent and gains it once wired.
+- `tests/test_main.py` (4) + 3 in `test_app.py`. Docs synced.
+
+### Direction change (owner, after C8) — re-plan from scratch
+
+- Owner wants a from-scratch, hardware-first execution plan: P1 basic printer
+  control validated on the bench (stream existing G-code, home, jog, temps), then
+  P2 slicing (STL → G-code), then P3 pause / magnet insertion revisited. Plus a
+  `proto_run.py` guided entry point that probes Uno + printer and walks
+  STL → slice → add pause → stream.
+- Owner asked whether to build from the Printrun/Pronterface repo. **Blocker
+  raised:** Printrun is GPLv3, this repo is MIT — copying its code forces a
+  relicense of the whole project. Recommendation: keep our own MIT streaming core
+  (already 105 tests, C7/C8 just landed), read Printrun only for approach, and get
+  slicing by shelling out to an existing slicer CLI (PrusaSlicer/OrcaSlicer console,
+  CuraEngine, or Creality Print) rather than writing one or importing Cura.
+- C9–C12 (Pronterface-grade panel polish) paused pending the new plan. `BUILD_PLAN.md`
+  Phase 1.5 to be superseded by the new plan doc once the owner confirms direction.
+

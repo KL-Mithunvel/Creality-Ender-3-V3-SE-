@@ -50,7 +50,7 @@ involvement is acceptable at this stage.
 | Option | Verdict |
 |--------|---------|
 | Slicer pause-at-layer only (`M0`), manual insert | **Phase 0** — used to prove the mechanical/encapsulation concept only. No code. |
-| Pronterface / Printrun GUI | Bring-up / manual console only, not the product. UX inspiration for our own Tkinter panel (C8–C11), but **no `printrun` dependency and no copied code** — Printrun is GPLv3, this repo is MIT. |
+| Pronterface / Printrun GUI | Bring-up / manual console only, not the product. UX inspiration for our own Tkinter panel (C9–C12), but **no `printrun` dependency and no copied code** — Printrun is GPLv3, this repo is MIT. |
 | **Python host script (`pyserial` / `printrun.printcore`) + Tkinter panel** | **Chosen.** Matches the owner's stack, no firmware reflash, runs from the Windows PC. |
 | OctoPrint on a Raspberry Pi | Rejected for now — adds a device; no Pi wanted. |
 | Klipper + Moonraker | Rejected for now — requires reflashing the printer and losing the stock screen. Revisit only if macro unification becomes compelling. |
@@ -62,11 +62,12 @@ involvement is acceptable at this stage.
 > Build status: **C1–C6 done — Phase 1 software complete** (`project/BUILD_PLAN.md`).
 > Sim pipeline + insert sequence + `postprocess` + Tkinter panel + real serial links
 > + per-run logging + integration test; sanity checklist passed. Printer serial link
-> verified on real hardware (COM3). **C7 done** — `main_printer` printer-only entry
-> point (98 tests). **C8–C11 in progress** — Pronterface-grade panel (manual G-code
-> entry, live idle polling, extrude/retract, run progress). What remains for the
-> magnet flow is hardware: build the applicator, wire the Uno, measure the offset,
-> run the **manual** hardware smoke test. `.venv` first, always.
+> verified on real hardware (COM3). **C7–C8 done** — `main_printer` printer-only
+> entry point + `main` now runs without the Uno (105 tests). **C9–C12 in progress**
+> — Pronterface-grade panel (manual G-code entry, live idle polling, extrude/retract,
+> run progress). What remains for the magnet flow is hardware: build the applicator,
+> wire the Uno, measure the offset, run the **manual** hardware smoke test.
+> `.venv` first, always.
 
 ```bat
 :: one-time setup (Windows) — the project venv is `.venv`
@@ -91,7 +92,9 @@ python -m magnet_embed.main_printer part.gcode    :: control panel, file pre-loa
 
 :: full hardware — after the pre-hardware checklist
 python -m magnet_embed.main --ping        :: connect to printer + Uno, report, exit
-python -m magnet_embed.main               :: control panel on real hardware
+python -m magnet_embed.main               :: control panel; if the Uno can't connect it
+                                          ::   logs a warning + runs printer-only this session
+python -m magnet_embed.main --no-dispenser :: don't even build the Uno link
 ```
 
 Config: `magnet_embed/config.yaml` holds committed defaults; a git-ignored
@@ -112,7 +115,7 @@ three read the same `magnet_embed/config.yaml`.
 | Path | Role |
 |------|------|
 | `magnet_embed/config.yaml` | All ports, baud, park/safe-Z, temps, the magnet-tool XYZ offset, press/shear distances + feeds, sentinel token. Nothing hardware-specific is hardcoded elsewhere. |
-| `magnet_embed/main.py` | Full-hardware entry point — real printer + real Arduino dispenser. |
+| `magnet_embed/main.py` | Full-hardware entry point — real printer + real Arduino dispenser. The Uno is optional at runtime: `--no-dispenser` skips it, and a dispenser that fails to connect degrades to printer-only for the session (operator prompt fallback). |
 | `magnet_embed/main_printer.py` | Printer-only entry point — real printer, `dispenser=None`. Stream a print, jog, send raw G-code, load filament with no Uno attached. `--ping` = printer smoke test. |
 | `magnet_embed/main_sim.py` | Dev entry point — simulated printer + simulated dispenser. |
 | `magnet_embed/state.py` | `PrinterState` dataclass (position, temps, connection, run status) + `MagnetInsert` (parsed sentinel fields). |
@@ -246,6 +249,9 @@ hardware attached.
   `GcodeRunner`, and two queues. `start_run()` spawns a daemon worker;
   worker→UI events via `poll_events()`; the insert sequence's `prompt()` blocks the
   worker on an answers queue until `answer_prompt(value)`.
+- `dispenser_optional=True` (used by `main.py`): if `dispenser.connect()` raises a
+  `DispenserError`, `connect()` logs it, drops `self.dispenser` to `None`, and does
+  not raise — the run continues printer-only. Default `False` keeps it strict.
 - Actions: `connect`, `load_gcode`, `jog`, `home`, `set_temp` (all no-ops while a run
   is active), `start_run`, `pause`, `resume`, `cancel`, `answer_prompt`.
 - Event kinds: `log`, `state` (a `PrinterState`), `prompt` (`"dispense"`/`"confirm"`),

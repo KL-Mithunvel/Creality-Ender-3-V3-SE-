@@ -9,7 +9,7 @@ chunks. Each chunk: build → `pytest` green → stage → commit.
 |--|--|
 | Owner | kl mithunvel |
 | Created | 2026-09-09 |
-| Status | **C1–C6 done, 94 tests.** Software side of Phase 1 complete; hardware smoke test (manual) pending the applicator build. **C7–C11 (printer-only streaming + Pronterface-grade panel) planned — see below.** |
+| Status | **C1–C8 done, 105 tests.** Phase 1 software + printer-only entry point + `main` runs without the Uno. **C9–C12 (Pronterface-grade panel) in progress — see Phase 1.5 below.** Magnet-flow hardware smoke test still pending the applicator build. |
 | Overall plan | `project/PROJECT_PLAN.md` |
 | Architecture / rules | `.CLAUDE/CLAUDE.md` |
 
@@ -300,14 +300,15 @@ loop stays our own (`GcodeRunner` + `SerialPrinter`). Ports stay config-driven
 (Dev Rule 3) — no serial-port scanner in the UI. Not in scope: temperature graph,
 3D G-code preview.
 
-**Shared benefit.** C8–C11 all land in `ui/panel.py` + `app.Controller`, so
-`main.py` (full hardware) and `main_sim.py --gui` get the same features for free.
+**Chunks.** C7 printer-only entry point (done). C8 `main` runs without the Arduino.
+C9–C12 land in `ui/panel.py` + `app.Controller`, so all three entry points
+(`main`, `main_printer`, `main_sim --gui`) get the panel features for free.
 
 One commit per chunk; `pytest` green + docs in the same commit, as before.
 
 ---
 
-### C7 — Printer-only entry point  🟢
+### C7 — Printer-only entry point  ✅  *(commit 67262e5)*
 
 **Goal.** `python -m magnet_embed.main_printer` — a third entry point (sim vs
 hardware is chosen by entry point, never a flag) that wires **only** the real
@@ -318,27 +319,46 @@ hardware is chosen by entry point, never a flag) that wires **only** the real
 `;MAGNET_INSERT` sentinel is hit, the panel's existing "Load a magnet" prompt is the
 fallback. A plain slice (no sentinel) just streams start to finish.
 
-**Files**
-```
-magnet_embed/main_printer.py    mirror of main.py: build SerialPrinter only;
-                                Controller(printer, dispenser=None, config, log_dir="logs");
-                                --ping (printer only), --config, -v, optional gcode positional;
-                                else run_gui(controller)
-tests/test_main_printer.py      --ping path + dispenser=None wiring (monkeypatched SerialPrinter)
-```
-Docs: `README.md` quick start, `.CLAUDE/CLAUDE.md` (module table, entry-point rules,
-Running section, Deployment table), `TODO.md`, `.CLAUDE/CLAUDE-LOG.md`.
-
-**Tests / acceptance**
-- `main_printer.main(["--ping"])` connects, prints `printer OK …`, disconnects, returns 0;
-  on failure returns 1 and does not touch a dispenser.
-- Controller built by `main_printer` has `dispenser is None`; `connect()` opens only the printer.
-- Manual: `python -m magnet_embed.main_printer Cube.magnet.gcode` — panel opens,
-  streams the file on COM3 to completion.
+**Done:** `magnet_embed/main_printer.py` + `tests/test_main_printer.py` (4 tests,
+98 total). `--ping`, `--config`, `-v`, optional `gcode` positional. Docs synced
+(README, CLAUDE.md entry-point / module table / Running / Deployment, TODO,
+CLAUDE-LOG).
 
 ---
 
-### C8 — Manual G-code entry  🟢
+### C8 — `main` runs without the Arduino  ✅
+
+**Goal.** `python -m magnet_embed.main` should launch the app **now**, before the
+Uno exists — so the owner can run the real thing whenever they want and it just
+gains the dispenser once it's wired. `main_printer` stays the deliberate
+"printer-only" entry point; this makes `main` degrade gracefully instead of
+failing at `dispenser.connect()`.
+
+**Design.**
+- `main.py` gets `--no-dispenser` (skip building `SerialDispenser` entirely →
+  `Controller(printer, None, …)`).
+- Without the flag: build the dispenser, but if `dispenser.connect()` raises
+  (`DispenserError` / connection error) during `controller.connect()`, log a clear
+  warning and **continue printer-only** for this session (`controller.dispenser`
+  set to `None`). A sentinel then falls back to the operator "Load a magnet" prompt.
+- `--ping` already reports printer and dispenser independently — keep, but make the
+  dispenser failure non-fatal to the return code when `--no-dispenser` is given.
+- `Controller.connect()` grows a `dispenser_optional: bool` (default `False`,
+  preserving current strictness) — when `True`, a dispenser connect failure emits a
+  `log`/`error` event, drops `self.dispenser` to `None`, and does not raise.
+
+**Done:** `Controller(..., dispenser_optional=True)` ctor flag — a `DispenserError`
+from `dispenser.connect()` is caught, a `log` event explains it, `self.dispenser`
+drops to `None`, no raise. Default `False` keeps the old strictness. `main.py`:
+`_build(with_dispenser=…)`, `--no-dispenser` flag, `--ping` prints
+`dispenser SKIPPED` when off, GUI path passes `dispenser_optional=True` and only
+`PrinterConnectionError` is fatal. `tests/test_main.py` (4) + 3 in `test_app.py`;
+105 tests. Docs synced (CLAUDE.md Running + module table + `Controller` section,
+README, TODO, CLAUDE-LOG).
+
+---
+
+### C9 — Manual G-code entry  🟢
 
 **Goal.** A Pronterface-style command line: type `G1 X10 F600` / `M114` / `M303`,
 hit Send (or Enter), see the reply in the log. Idle only (blocked mid-run).
@@ -358,7 +378,7 @@ row, `<Return>` bound, disabled while `self.c.running`.
 
 ---
 
-### C9 — Live idle polling  🟢
+### C10 — Live idle polling  🟢
 
 **Goal.** While connected and idle, refresh position + temps automatically (~2 s)
 so the readout tracks reality without clicking — Pronterface's always-on monitor.
@@ -383,7 +403,7 @@ for a bench tool and matches Pronterface's model; moving it to the reader thread
 
 ---
 
-### C10 — Extrude / retract  🟢
+### C11 — Extrude / retract  🟢
 
 **Goal.** Load/unload filament from the panel: an amount (default 5 mm) + feedrate
 (default 300 mm/min), Extrude and Retract buttons. Idle only.
@@ -392,7 +412,7 @@ for a bench tool and matches Pronterface's model; moving it to the reader thread
 ignore + log while running; `printer.command("M83")`; `printer.command(f"G1 E{mm:g} F{feed:g}")`;
 restore prior E mode is **not** needed (jog already leaves G91→G90; extruder mode is
 reset by every slice preamble) — but note it. Retract = negative `mm`. Cold-extrude
-safety is left to firmware (`M302`); the resulting `Error:` surfaces via the C8 error path.
+safety is left to firmware (`M302`); the resulting `Error:` surfaces via the C9 error path.
 `magnet_embed/ui/panel.py` — a "Filament" LabelFrame with the two entries + buttons.
 
 **Tests / acceptance**
@@ -402,7 +422,7 @@ safety is left to firmware (`M302`); the resulting `Error:` surfaces via the C8 
 
 ---
 
-### C11 — Run progress  🟢
+### C12 — Run progress  🟢
 
 **Goal.** During a stream, show `line 1234 / 5678  (22%)` and a progress bar.
 

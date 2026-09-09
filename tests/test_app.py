@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from magnet_embed.app import Controller
+from magnet_embed.exceptions import DispenserError
 from magnet_embed.links.dispenser_sim import SimDispenser
 from magnet_embed.links.printer_sim import SimPrinter
 
@@ -121,3 +122,31 @@ def test_load_rejected_while_running(config):
     ctl.load_gcode("something_else.gcode")
     assert any(k == "log" and "cannot load" in str(p) for k, p in ctl.poll_events())
     _pump_until(ctl, "done", answer="success")
+
+
+# --- C8: dispenser optional at connect time ---------------------------
+
+class _BrokenDispenser:
+    def connect(self):
+        raise DispenserError("cannot open COM4: not found")
+
+
+def test_optional_dispenser_degrades_to_none(config):
+    ctl = Controller(SimPrinter(), _BrokenDispenser(), config, dispenser_optional=True)
+    ctl.connect()
+    assert ctl.dispenser is None
+    assert any(
+        k == "log" and "dispenser unavailable" in str(p) for k, p in ctl.poll_events()
+    )
+
+
+def test_required_dispenser_failure_still_raises(config):
+    ctl = Controller(SimPrinter(), _BrokenDispenser(), config)  # optional defaults False
+    with pytest.raises(DispenserError):
+        ctl.connect()
+
+
+def test_healthy_dispenser_connects_when_optional(config):
+    ctl = Controller(SimPrinter(), SimDispenser(), config, dispenser_optional=True)
+    ctl.connect()
+    assert isinstance(ctl.dispenser, SimDispenser)

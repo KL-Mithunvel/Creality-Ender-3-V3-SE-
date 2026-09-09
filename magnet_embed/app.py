@@ -19,7 +19,7 @@ import threading
 from pathlib import Path
 
 from .config import load_config
-from .exceptions import SequenceAborted
+from .exceptions import DispenserError, SequenceAborted
 from .gcode.runner import GcodeRunner
 from .links.base import DispenserLink, PrinterLink
 from .runlog import RunLog, new_run_log
@@ -37,9 +37,11 @@ class Controller:
         config: dict | None = None,
         *,
         log_dir: str | Path | None = None,
+        dispenser_optional: bool = False,
     ) -> None:
         self.printer = printer
         self.dispenser = dispenser
+        self.dispenser_optional = dispenser_optional
         self.config = config or load_config()
         self.log_dir = log_dir
         self.gcode_path: Path | None = None
@@ -71,7 +73,17 @@ class Controller:
     def connect(self) -> None:
         self.printer.connect()
         if self.dispenser is not None:
-            self.dispenser.connect()
+            try:
+                self.dispenser.connect()
+            except DispenserError as exc:
+                if not self.dispenser_optional:
+                    raise
+                self._emit(
+                    "log",
+                    f"dispenser unavailable ({exc}); continuing printer-only - "
+                    "magnet inserts will fall back to the operator prompt",
+                )
+                self.dispenser = None
         self._emit("log", "connected")
         self._emit_state()
 
