@@ -10,7 +10,7 @@ criteria, risks). Architecture and rules: `.CLAUDE/CLAUDE.md`. Keep all three in
       bring-your-own-G-code, visual insert planning. Absorbs the paused C9–C12.
       - [x] C13 root `main.py` + `magnet_embed/entry.py` mode dispatch + `Controller.send_command` (130 tests)
       - [x] C14 `gcode/toolpath.py` — parse a slice into segments + layer table (139 tests)
-      - [ ] C15 `sequences/geometry.py` — `plan_insert_moves` factored out of `insert_magnet`
+      - [x] C15 `sequences/geometry.py` — `plan_insert_moves`/`check_envelope` factored out of `insert_magnet` (146 tests)
       - [ ] C16 `viz/preview.py` — matplotlib toolpath + insert-motion animation
       - [ ] C17 `ui/plan_dialog.py` — place the sentinel + save `*.magnet.gcode`
       - [ ] C18 idle polling + extrude/retract + run-progress bar (was C10–C12)

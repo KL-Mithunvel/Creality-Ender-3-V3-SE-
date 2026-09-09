@@ -131,7 +131,8 @@ back-compat wrappers that call `entry` with a fixed mode.
 | `magnet_embed/gcode/runner.py` | `GcodeRunner` — streams lines, waits for `ok`, detects + parses the sentinel, handles pause / resume / cancel. |
 | `magnet_embed/gcode/postprocess.py` | Inserts the `;MAGNET_INSERT X Y Z S<dir>` sentinel comment at a chosen layer / height. |
 | `magnet_embed/gcode/toolpath.py` | `parse_toolpath(path) -> Toolpath` — a slice as ordered `Segment`s (travel vs extrude), a layer→Z table (slicer markers, else Z-derived), bounding box, distances, rough time. Feeds the visualisation + the plan dialog. |
-| `magnet_embed/sequences/insert_magnet.py` | The `SAVE → PARK → DISPENSE → APPROACH → PRESS → SHEAR → LIFT → ASK → RESUME` state machine. |
+| `magnet_embed/sequences/geometry.py` | `compute_targets` / `plan_insert_moves` / `check_envelope` / `pole_point` — the one place the insert-motion targets are computed. `insert_magnet` executes them; the preview + plan dialog draw and envelope-check the same numbers. |
+| `magnet_embed/sequences/insert_magnet.py` | The `SAVE → PARK → DISPENSE → APPROACH → PRESS → SHEAR → LIFT → ASK → RESUME` state machine. Targets come from `geometry.compute_targets`. |
 | `magnet_embed/app.py` | `Controller` — headless UI↔worker mediator (threads, queues, prompt blocking); optional `log_dir` writes a per-run transcript. |
 | `magnet_embed/runlog.py` | `RunLog` — one `logs/<ts>-<name>.log` per streamed job, a timestamped line per event. |
 | `magnet_embed/ui/panel.py` | Tkinter panel — thin view over `Controller`; jog/home + raw G-code entry idle-only, modal Success/Retry/Abort prompt, live log. |
@@ -236,13 +237,23 @@ hardware attached.
 - Understands Cura / Creality Print (`;LAYER:<n>`) and PrusaSlicer (`;LAYER_CHANGE` + `;Z:<h>`) markers.
 - CLI: `python -m magnet_embed.gcode.postprocess <file> (--layer N | --z H) --xy PX PY --seat-z SZ --shear +X|-X|+Y|-Y [-o OUT]`.
 
+### `sequences/geometry.py`
+- `compute_targets(mi, config, saved) -> Targets` (`approach_xy`, `press_z`,
+  `shear_xy`, `safe_z`), `plan_insert_moves(mi, config, saved) -> list[InsertMove]`
+  (nozzle-tip waypoints, phase-tagged), `check_envelope(mi, config, saved) -> list[str]`,
+  `pole_point(nozzle, config) -> Point`.
+- Pure. `insert_magnet` builds its targets here; the C16 preview and C17 dialog draw
+  and envelope-check the *same* function output — the preview cannot drift from the run.
+
 ### `sequences/insert_magnet.py`
 - `insert_magnet(printer: PrinterLink, dispenser: DispenserLink | None, mi: MagnetInsert,
   config: dict, prompt: Callable[[str], str]) -> None`
   — `mi` carries the parsed sentinel fields; `prompt("dispense")` returns
   `"ready" | "abort"` (only used when `dispenser` is `None`), `prompt("confirm")`
   returns `"success" | "retry" | "abort"`.
-- Runs the state machine in Architecture → Insert sequence; every phase gated with `M400`.
+- Targets from `geometry.compute_targets`; envelope from `geometry.check_envelope`
+  (raises `OutOfEnvelopeError` if non-empty). Runs the state machine in
+  Architecture → Insert sequence; every phase gated with `M400`.
 - Raises `OutOfEnvelopeError` (before any move), `SequenceAborted`, or the dispenser's error.
 - **No `G28` anywhere** — every move is commanded and tracked (Development Rule 11).
 - On any failure: nozzle target restored (or set to 0 on operator abort), re-raised. Never swallowed.

@@ -31,19 +31,13 @@ from ..exceptions import OutOfEnvelopeError, SequenceAborted
 from ..gcode.util import fmt_number as _fmt
 from ..links.base import DispenserLink, PrinterLink
 from ..state import MagnetInsert, PrinterState
+from .geometry import check_envelope, compute_targets
 
 log = logging.getLogger(__name__)
 
 #: `prompt(stage)` where stage is "dispense" (-> "ready"/"abort") or
 #: "confirm" (-> "success"/"retry"/"abort").
 Prompt = Callable[[str], str]
-
-_SHEAR_VEC: dict[str, tuple[float, float]] = {
-    "+X": (1.0, 0.0),
-    "-X": (-1.0, 0.0),
-    "+Y": (0.0, 1.0),
-    "-Y": (0.0, -1.0),
-}
 
 
 def _send(printer: PrinterLink, *lines: str) -> None:
@@ -64,8 +58,6 @@ def insert_magnet(
     the dispenser raises. On any failure the nozzle target is restored so the
     print stays resumable (Development Rule 5).
     """
-    off = config["magnet_tool_offset"]
-    machine = config["machine"]
     park = config["park"]
     press = config["press"]
     shear = config["shear"]
@@ -75,25 +67,20 @@ def insert_magnet(
     travel_feed = config["travel"]["feed"]
     max_retries = config.get("sequence", {}).get("max_retries", 3)
 
-    carriage_x = mi.pocket_x - off["x"]
-    carriage_y = mi.pocket_y - off["y"]
-    press_z = mi.seat_z - off["z"]
-    sdx, sdy = _SHEAR_VEC[mi.shear_dir]
-    shear_x = carriage_x + sdx * shear["distance"]
-    shear_y = carriage_y + sdy * shear["distance"]
-
     saved: PrinterState = printer.query_state()
-    safe_z = saved.z + park["safe_z_lift_mm"]
+
+    targets = compute_targets(mi, config, saved)
+    carriage_x, carriage_y = targets.approach_xy
+    press_z = targets.press_z
+    shear_x, shear_y = targets.shear_xy
+    safe_z = targets.safe_z
 
     # --- envelope check: before ANY motion (Development Rule 12) ---------
-    _check_envelope(
-        ("approach X", carriage_x, machine["x_max"]),
-        ("approach Y", carriage_y, machine["y_max"]),
-        ("shear X", shear_x, machine["x_max"]),
-        ("shear Y", shear_y, machine["y_max"]),
-        ("press Z", press_z, machine["z_max"]),
-        ("safe Z", safe_z, machine["z_max"]),
-    )
+    bad = check_envelope(mi, config, saved)
+    if bad:
+        raise OutOfEnvelopeError(
+            "insert aborted, print left paused — " + "; ".join(bad)
+        )
 
     try:
         # --- PARK ------------------------------------------------------
@@ -189,15 +176,6 @@ def insert_magnet(
     except Exception:
         _try(printer, f"M104 S{_fmt(saved.nozzle_target)}")  # keep it resumable
         raise
-
-
-def _check_envelope(*checks: tuple[str, float, float]) -> None:
-    for name, value, hi in checks:
-        if value < 0 or value > hi:
-            raise OutOfEnvelopeError(
-                f"{name} target {value:.2f} mm is outside [0, {hi}] — "
-                "insert aborted, print left paused"
-            )
 
 
 def _try(printer: PrinterLink, line: str) -> None:

@@ -447,9 +447,9 @@ and the magnet-insert motion before committing to hardware, a GUI to place the
 sentinel and save the file, and the panel polish (raw G-code, idle polling,
 extrude/retract, progress) that was scoped as C9–C12.
 
-**Supersedes.** `project/PROTO_PLAN.md` (the never-executed `proto/` rewrite) — its
-one durable decision, *drop the slicer*, is folded in here. We **extend
-`magnet_embed/`**; the 105-test core is not rewritten. `PROTO_PLAN.md` is deleted in C19.
+**Supersedes.** `project/PROTO_PLAN.md` (the never-executed `proto/` rewrite,
+removed in commit 409fb10) — its one durable decision, *drop the slicer*, is folded
+in here. We **extend `magnet_embed/`**; the 105-test core is not rewritten.
 
 **Scope guard.** No slicing, no `printrun` dependency, no firmware reflash. Sentinel
 stays an inert `;MAGNET_INSERT` comment so the saved file still prints from microSD
@@ -527,7 +527,15 @@ no Z moves — markers carry it). `Toolpath` exposes `layer_count`, `move_count`
 
 ---
 
-### C15 — Shared insert geometry (`sequences/geometry.py`)  🟢
+### C15 — Shared insert geometry (`sequences/geometry.py`)  ✅
+
+**Done:** `sequences/geometry.py` — `compute_targets` (approach_xy, press_z,
+shear_xy, safe_z), `plan_insert_moves` (8 phase-tagged nozzle waypoints:
+PARK/APPROACH/PRESS/SHEAR/LIFT/CLEAR/RESUME×2), `check_envelope` (list of bad-target
+labels), `pole_point`. `insert_magnet` refactored to build its targets and its
+envelope check here — the C2 assertions (targets, no `G28`, restore-on-error) pass
+untouched; the old local `_SHEAR_VEC` / `_check_envelope` removed.
+`tests/test_geometry.py` (7). 146 tests.
 
 **Goal.** One function computes the insert motion; the sequence executes it and the
 viewer draws it, so they can never disagree.
@@ -617,8 +625,7 @@ viewer draws it, so they can never disagree.
   → sentinel fires `insert_magnet` → `confirm→success` → EOF; assert final position,
   temp, and that the saved file carried the sentinel.
 - Docs: `.CLAUDE/CLAUDE.md` (entry points, module table, Running, Architecture data
-  flow), `project/PROJECT_PLAN.md`, `TODO.md`, `README.md`. **Delete
-  `project/PROTO_PLAN.md`.**
+  flow), `project/PROJECT_PLAN.md`, `TODO.md`, `README.md`.
 - `pytest` green; `python -m py_compile magnet_embed/*.py magnet_embed/**/*.py main.py`
   clean. Sanity checklist (Dev-Rule scan: no `G28`/`M0` in sequence paths, config
   fully read, sim↔serial API parity, exceptions raised somewhere) recorded in

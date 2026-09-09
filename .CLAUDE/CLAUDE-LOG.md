@@ -347,3 +347,14 @@
   markers, Z-rise heuristic fallback when a file has none. `Toolpath` helpers:
   counts, `top_z`, extrude/travel distance, rough `est_time_s`, `segments_in_layer`,
   `layer_for_z`. `tests/test_toolpath.py` (9).
+
+### C15 — `sequences/geometry.py` (shared insert-motion targets) ✅ (146 tests)
+
+- `compute_targets` / `plan_insert_moves` / `check_envelope` / `pole_point`. The
+  insert-motion numbers live in one pure module now; `insert_magnet` builds its
+  targets and its envelope check from it, so the C16 preview and the C17 dialog
+  draw exactly what the sequence will command.
+- `insert_magnet` refactored (local `_SHEAR_VEC` / `_check_envelope` removed); the
+  C2 behaviour is unchanged and its tests pass untouched. `tests/test_geometry.py` (7).
+- Also removed the accidentally-committed `project/PROTO_PLAN.md` (commit 409fb10)
+  and corrected the BUILD_PLAN references.
