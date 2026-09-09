@@ -28,13 +28,17 @@ part over the magnet**. Prototype-stage; manual operator involvement is expected
 ## Quick start (once code exists)
 
 ```bat
-python -m venv venv
-venv\Scripts\activate
-pip install -r requirements.txt
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements-dev.txt
 
-python magnet_embed\main_sim.py     :: simulation — no hardware
-python magnet_embed\main.py         :: hardware — after the pre-hardware checklist
+python -m magnet_embed.main_sim --gui part.magnet.gcode   :: simulation — no hardware
+python -m magnet_embed.main_printer part.gcode            :: real printer, no dispenser — stream a print now
+python -m magnet_embed.main                               :: full hardware — after the pre-hardware checklist
 ```
+
+Three entry points, one per hardware set-up (never a flag): `main_sim` (all
+simulated), `main_printer` (real printer, `dispenser=None`), `main` (printer + Uno).
 
 ## Documents
 
@@ -53,9 +57,12 @@ python magnet_embed\main.py         :: hardware — after the pre-hardware check
 
 **Phase 1 software complete** — the full control stack (streaming, sentinel
 detection, the park→dispense→press→shear→resume insert sequence, post-processor,
-Tkinter panel, real serial links) works against a simulated printer + dispenser,
-with 94 passing tests. It has **not** run on real hardware yet.
+Tkinter panel, real serial links) works against a simulated printer + dispenser.
+The **printer serial link is verified on real hardware** (COM3). A printer-only
+entry point (`main_printer`) streams real prints now, with the panel growing
+Pronterface-grade controls (raw G-code entry, live temp/position polling,
+extrude/retract, run progress — `project/BUILD_PLAN.md` C7–C11).
 
-Next: build the clip-on applicator + Arduino sketch, measure the tool offset, and
-run the manual hardware smoke test. See `project/BUILD_PLAN.md` and
-`project/PROJECT_PLAN.md`.
+Next for the magnet flow: build the clip-on applicator + Arduino sketch, measure
+the tool offset, run the manual hardware smoke test. See `project/BUILD_PLAN.md`
+and `project/PROJECT_PLAN.md`.

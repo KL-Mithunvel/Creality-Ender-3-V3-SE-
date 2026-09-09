@@ -9,7 +9,7 @@ chunks. Each chunk: build → `pytest` green → stage → commit.
 |--|--|
 | Owner | kl mithunvel |
 | Created | 2026-09-09 |
-| Status | **C1–C6 done, 94 tests.** Software side of Phase 1 complete; hardware smoke test (manual) pending the applicator build. |
+| Status | **C1–C6 done, 94 tests.** Software side of Phase 1 complete; hardware smoke test (manual) pending the applicator build. **C7–C11 (printer-only streaming + Pronterface-grade panel) planned — see below.** |
 | Overall plan | `project/PROJECT_PLAN.md` |
 | Architecture / rules | `.CLAUDE/CLAUDE.md` |
 
@@ -285,6 +285,136 @@ to `RLock`. Good argument for the integration test existing.
   - [ ] `SimPrinter` and (future) `printer_serial` present the same interface + exceptions
   - [ ] docs (`.CLAUDE/CLAUDE.md`, `PROJECT_PLAN.md`, this file, `TODO.md`, `README.md`) match the code
   - [ ] `requirements.txt` pinned; venv instructions correct
+
+---
+
+## Phase 1.5 — Printer-only streaming + Pronterface-grade panel
+
+**Why.** The printer is on the bench now; the Uno and the applicator are not. We want
+to stream a real print today and use the panel for manual bring-up (jog, send raw
+G-code, load filament, watch temps) — i.e. the day-to-day things Pronterface does.
+
+**Scope guard.** No `printrun` / `printcore` dependency and **no code copied from
+Pronterface** — it is GPLv3, this repo is MIT. UX inspiration only; the streaming
+loop stays our own (`GcodeRunner` + `SerialPrinter`). Ports stay config-driven
+(Dev Rule 3) — no serial-port scanner in the UI. Not in scope: temperature graph,
+3D G-code preview.
+
+**Shared benefit.** C8–C11 all land in `ui/panel.py` + `app.Controller`, so
+`main.py` (full hardware) and `main_sim.py --gui` get the same features for free.
+
+One commit per chunk; `pytest` green + docs in the same commit, as before.
+
+---
+
+### C7 — Printer-only entry point  🟢
+
+**Goal.** `python -m magnet_embed.main_printer` — a third entry point (sim vs
+hardware is chosen by entry point, never a flag) that wires **only** the real
+`SerialPrinter` and passes `dispenser=None` to `Controller`. Stream any sliced
+`.gcode` on the real printer with no Uno attached.
+
+`Controller.connect()` and `insert_magnet()` already handle `dispenser=None` — if a
+`;MAGNET_INSERT` sentinel is hit, the panel's existing "Load a magnet" prompt is the
+fallback. A plain slice (no sentinel) just streams start to finish.
+
+**Files**
+```
+magnet_embed/main_printer.py    mirror of main.py: build SerialPrinter only;
+                                Controller(printer, dispenser=None, config, log_dir="logs");
+                                --ping (printer only), --config, -v, optional gcode positional;
+                                else run_gui(controller)
+tests/test_main_printer.py      --ping path + dispenser=None wiring (monkeypatched SerialPrinter)
+```
+Docs: `README.md` quick start, `.CLAUDE/CLAUDE.md` (module table, entry-point rules,
+Running section, Deployment table), `TODO.md`, `.CLAUDE/CLAUDE-LOG.md`.
+
+**Tests / acceptance**
+- `main_printer.main(["--ping"])` connects, prints `printer OK …`, disconnects, returns 0;
+  on failure returns 1 and does not touch a dispenser.
+- Controller built by `main_printer` has `dispenser is None`; `connect()` opens only the printer.
+- Manual: `python -m magnet_embed.main_printer Cube.magnet.gcode` — panel opens,
+  streams the file on COM3 to completion.
+
+---
+
+### C8 — Manual G-code entry  🟢
+
+**Goal.** A Pronterface-style command line: type `G1 X10 F600` / `M114` / `M303`,
+hit Send (or Enter), see the reply in the log. Idle only (blocked mid-run).
+
+**Files:** `magnet_embed/app.py` — `Controller.send_command(line: str)`:
+strip; ignore blank; ignore + log while running; `_emit("log", f"> {line}")`;
+`reply = self.printer.command(line)`; if reply `_emit("log", f"< {reply}")`;
+`_emit_state()`; wrap `PrinterError` / `AckTimeout` → `_emit("error", …)` (don't
+raise into the Tk callback). `magnet_embed/ui/panel.py` — an Entry + "Send" button
+row, `<Return>` bound, disabled while `self.c.running`.
+
+**Tests / acceptance**
+- `send_command("M114")` calls `printer.command("M114")` once, echoes `>`/`<` to the log.
+- Blank / whitespace input → no call.
+- While a run is active → ignored with a log line, no `printer.command`.
+- `printer.command` raising `PrinterError` → an `error` event, no exception out of the method.
+
+---
+
+### C9 — Live idle polling  🟢
+
+**Goal.** While connected and idle, refresh position + temps automatically (~2 s)
+so the readout tracks reality without clicking — Pronterface's always-on monitor.
+
+**Design.** Panel-driven (no new thread): the existing 120 ms `_poll` gets a tick
+counter; every `ui.idle_poll_s` seconds, if `self.c.connected and not self.c.running`,
+call `Controller.refresh_state()` → `printer.command("M105")` (temps absorbed from
+the `ok T:…` payload by both links) then `_emit_state()` (`M400`+`M114` → position).
+New config key `ui: { idle_poll_s: 2.0 }` (0 disables). `Controller` gains a
+`connected` property (a flag set in `connect()`).
+
+**Trade-off (documented).** `refresh_state()` does blocking serial I/O on the Tk
+main thread; on an unresponsive printer the UI stalls up to `ack_timeout_s`. Fine
+for a bench tool and matches Pronterface's model; moving it to the reader thread
+(or Marlin `M155` auto-report) is a possible follow-up.
+
+**Tests / acceptance**
+- `refresh_state()` sends `M105` then queries state; emits one `state` event.
+- No-op when not connected or while running.
+- `idle_poll_s: 0` → panel never calls `refresh_state()` (assert on a fake controller).
+- Config: `ui.idle_poll_s` present in `config.yaml`, validated as a number ≥ 0.
+
+---
+
+### C10 — Extrude / retract  🟢
+
+**Goal.** Load/unload filament from the panel: an amount (default 5 mm) + feedrate
+(default 300 mm/min), Extrude and Retract buttons. Idle only.
+
+**Files:** `magnet_embed/app.py` — `Controller.extrude(mm: float, feed: float)`:
+ignore + log while running; `printer.command("M83")`; `printer.command(f"G1 E{mm:g} F{feed:g}")`;
+restore prior E mode is **not** needed (jog already leaves G91→G90; extruder mode is
+reset by every slice preamble) — but note it. Retract = negative `mm`. Cold-extrude
+safety is left to firmware (`M302`); the resulting `Error:` surfaces via the C8 error path.
+`magnet_embed/ui/panel.py` — a "Filament" LabelFrame with the two entries + buttons.
+
+**Tests / acceptance**
+- `extrude(5, 300)` → `M83` then `G1 E5 F300`.
+- `extrude(-2, 300)` → `G1 E-2 F300` (retract).
+- While running → ignored, no commands.
+
+---
+
+### C11 — Run progress  🟢
+
+**Goal.** During a stream, show `line 1234 / 5678  (22%)` and a progress bar.
+
+**Design.** `Controller.progress` property → `(sent, total)` from
+`self.runner` (`(0, 0)` when no runner). Panel reads it in `_poll` while running and
+updates a `ttk.Progressbar` + label. `runner.total_lines` counts every file line
+(comments/blanks included) so the bar tops out slightly below 100 % at EOF — the
+`done` event carries the true final counts; label switches to "done N/N" then.
+
+**Tests / acceptance**
+- `Controller.progress` is `(0, 0)` before a run, `(sent, total)` during, final counts after.
+- Manual: bar advances while `main_sim --gui` streams `tests/data/sample.gcode`.
 
 ---
 

@@ -33,8 +33,9 @@ involvement is acceptable at this stage.
   dispenses a single magnet** onto a holding pole at the tool tip. The **printer's
   own motion** then presses the magnet into the pocket and shears the tool away
   from it. Automation lands in Phase 2; Phase 1 triggers the steps by operator.
-- **License:** see `LICENSE`. **Entry points:** `magnet_embed/main_sim.py`
-  (simulation) and `magnet_embed/main.py` (hardware). **Min runtime:** Python 3.12.
+- **License:** see `LICENSE` (MIT). **Entry points:** `magnet_embed/main_sim.py`
+  (simulation), `magnet_embed/main_printer.py` (real printer, no dispenser), and
+  `magnet_embed/main.py` (full hardware). **Min runtime:** Python 3.12.
 
 ### Working assumptions
 
@@ -49,7 +50,7 @@ involvement is acceptable at this stage.
 | Option | Verdict |
 |--------|---------|
 | Slicer pause-at-layer only (`M0`), manual insert | **Phase 0** — used to prove the mechanical/encapsulation concept only. No code. |
-| Pronterface / Printrun GUI | Bring-up / manual console only, not the product. |
+| Pronterface / Printrun GUI | Bring-up / manual console only, not the product. UX inspiration for our own Tkinter panel (C8–C11), but **no `printrun` dependency and no copied code** — Printrun is GPLv3, this repo is MIT. |
 | **Python host script (`pyserial` / `printrun.printcore`) + Tkinter panel** | **Chosen.** Matches the owner's stack, no firmware reflash, runs from the Windows PC. |
 | OctoPrint on a Raspberry Pi | Rejected for now — adds a device; no Pi wanted. |
 | Klipper + Moonraker | Rejected for now — requires reflashing the printer and losing the stock screen. Revisit only if macro unification becomes compelling. |
@@ -60,15 +61,18 @@ involvement is acceptable at this stage.
 
 > Build status: **C1–C6 done — Phase 1 software complete** (`project/BUILD_PLAN.md`).
 > Sim pipeline + insert sequence + `postprocess` + Tkinter panel + real serial links
-> + per-run logging + integration test; 94 tests, sanity checklist passed. What
-> remains is hardware: build the applicator, wire the Uno, measure the offset, run
-> the **manual** hardware smoke test. venv first, always.
+> + per-run logging + integration test; sanity checklist passed. Printer serial link
+> verified on real hardware (COM3). **C7 done** — `main_printer` printer-only entry
+> point (98 tests). **C8–C11 in progress** — Pronterface-grade panel (manual G-code
+> entry, live idle polling, extrude/retract, run progress). What remains for the
+> magnet flow is hardware: build the applicator, wire the Uno, measure the offset,
+> run the **manual** hardware smoke test. `.venv` first, always.
 
 ```bat
-:: one-time setup (Windows)
-python -m venv venv
-venv\Scripts\activate
-pip install -r requirements.txt        :: uv migration planned — prefer uv when it lands
+:: one-time setup (Windows) — the project venv is `.venv`
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements-dev.txt    :: uv migration planned — prefer uv when it lands
 
 :: simulation — no hardware, safe on any machine
 python -m magnet_embed.main_sim tests\data\sample.gcode        :: headless
@@ -81,7 +85,11 @@ python -m py_compile magnet_embed\*.py
 :: G-code prep: inject the magnet sentinel at a layer (postprocess lands in C3)
 python -m magnet_embed.gcode.postprocess part.gcode --layer 40 --xy 120.5 98 --seat-z 6.2 --shear +X -o part.magnet.gcode
 
-:: hardware — after the pre-hardware checklist
+:: real printer, no dispenser — stream a print / jog / send raw G-code now
+python -m magnet_embed.main_printer --ping        :: connect to the printer, report, exit
+python -m magnet_embed.main_printer part.gcode    :: control panel, file pre-loaded
+
+:: full hardware — after the pre-hardware checklist
 python -m magnet_embed.main --ping        :: connect to printer + Uno, report, exit
 python -m magnet_embed.main               :: control panel on real hardware
 ```
@@ -91,8 +99,9 @@ Config: `magnet_embed/config.yaml` holds committed defaults; a git-ignored
 measured `magnet_tool_offset`.
 
 Simulation vs hardware is selected **by entry point**, not by a flag in code:
-`main_sim.py` wires the simulated links, `main.py` wires the serial links. Both read
-the same `magnet_embed/config.yaml`.
+`main_sim.py` wires the simulated links, `main_printer.py` wires the real printer
+with **no dispenser** (`dispenser=None`), `main.py` wires both serial links. All
+three read the same `magnet_embed/config.yaml`.
 
 ---
 
@@ -103,7 +112,8 @@ the same `magnet_embed/config.yaml`.
 | Path | Role |
 |------|------|
 | `magnet_embed/config.yaml` | All ports, baud, park/safe-Z, temps, the magnet-tool XYZ offset, press/shear distances + feeds, sentinel token. Nothing hardware-specific is hardcoded elsewhere. |
-| `magnet_embed/main.py` | Hardware entry point — real printer + real Arduino dispenser. |
+| `magnet_embed/main.py` | Full-hardware entry point — real printer + real Arduino dispenser. |
+| `magnet_embed/main_printer.py` | Printer-only entry point — real printer, `dispenser=None`. Stream a print, jog, send raw G-code, load filament with no Uno attached. `--ping` = printer smoke test. |
 | `magnet_embed/main_sim.py` | Dev entry point — simulated printer + simulated dispenser. |
 | `magnet_embed/state.py` | `PrinterState` dataclass (position, temps, connection, run status) + `MagnetInsert` (parsed sentinel fields). |
 | `magnet_embed/links/printer_link.py` | Abstract `PrinterLink` — `connect`, `send_line`, `wait_ok`, `query_state`, `disconnect`. |
@@ -342,13 +352,13 @@ tracked file.
 The dev machine **is** the runtime machine. "Deployment" here means attaching hardware
 and switching entry point — there is no code transfer.
 
-| | Simulation | Hardware run |
-|--|-----------|--------------|
-| OS | Windows 11 | Windows 11 (same PC) |
-| Python | 3.12 venv | 3.12 venv (same) |
-| Printer | `links/printer_sim.py` | Ender-3 V3 SE, USB-C, `COM?`, 115200 |
-| Dispenser | `links/dispenser_sim.py` | Arduino Uno, USB, `COM?` (Phase 2) |
-| Entry | `python magnet_embed\main_sim.py` | `python magnet_embed\main.py` |
+| | Simulation | Printer only | Full hardware |
+|--|-----------|--------------|--------------|
+| OS | Windows 11 | Windows 11 (same PC) | Windows 11 (same PC) |
+| Python | 3.12 `.venv` | 3.12 `.venv` (same) | 3.12 `.venv` (same) |
+| Printer | `links/printer_sim.py` | Ender-3 V3 SE, USB-C, `COM3`, 115200 | Ender-3 V3 SE, USB-C, `COM3`, 115200 |
+| Dispenser | `links/dispenser_sim.py` | none (`dispenser=None`) | Arduino Uno, USB, `COM?` (Phase 2) |
+| Entry | `python -m magnet_embed.main_sim` | `python -m magnet_embed.main_printer` | `python -m magnet_embed.main` |
 
 ### Pre-hardware checklist (must pass in simulation first)
 
@@ -367,9 +377,14 @@ and switching entry point — there is no code transfer.
 
 ```bat
 python -m magnet_embed.main --ping                      :: both devices at once
+python -m magnet_embed.main_printer --ping              :: printer only, via the entry point
 python -m magnet_embed.links.printer_serial    --ping   :: printer only (M115 -> ok)
 python -m magnet_embed.links.dispenser_serial  --ping   :: Uno only (-> PONG)   (Phase 2)
 ```
+
+**Printer link verified on real hardware 2026-09-09** (`printer_serial --ping` on
+COM3 — `M115`/`M400`/`M114` OK). The Uno and applicator are not built yet; use
+`main_printer` for real prints in the meantime.
 
 Then: short air-print (Z raised, no filament) with a sentinel near layer 2 — head
 parks, magnet dispensed, controlled press + lateral shear run, print resumes and completes.

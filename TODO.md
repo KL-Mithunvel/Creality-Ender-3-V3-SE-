@@ -6,6 +6,11 @@ criteria, risks). Architecture and rules: `.CLAUDE/CLAUDE.md`. Keep all three in
 
 ## In Progress
 
+- [ ] **C8–C11** — Pronterface-grade panel (`project/BUILD_PLAN.md` Phase 1.5):
+      - [ ] C8 manual G-code entry (`Controller.send_command` + panel field)
+      - [ ] C9 live idle polling (auto temp/position refresh while connected + idle)
+      - [ ] C10 extrude / retract controls
+      - [ ] C11 run progress (line N / total, %)
 - [ ] Hardware: build the clip-on applicator (magazine + escapement + holding pole + mount);
       wire the Arduino Uno + servo; measure `magnet_tool_offset`; run the manual smoke test
 - [ ] Patent: fill the `[INVENTORS TO COMPLETE]` sections of `docs/INVENTION_DISCLOSURE_DRAFT.md`,
@@ -38,6 +43,9 @@ criteria, risks). Architecture and rules: `.CLAUDE/CLAUDE.md`. Keep all three in
 - [x] **C6** — `runlog.py` (per-run transcript), config numeric/type validation,
       end-to-end integration test, full sanity checklist. 94 tests. Fixed a `RunLog`
       RLock deadlock found by the integration test. **Phase 1 software complete.**
+- [x] **C7** — `magnet_embed/main_printer.py` printer-only entry point (real
+      `SerialPrinter`, `dispenser=None`); `--ping`. Stream a real print with no Uno.
+      98 tests.
 
 ## Not Started
 
@@ -56,7 +64,12 @@ Chunked in `project/BUILD_PLAN.md` — one commit per chunk.
 - [x] C4 `app.Controller` mediator + `ui/panel.py` Tkinter panel + modal prompt (64 pass)
 - [x] C5 `_marlin_rx` + `printer_serial` + `dispenser_serial` + `main.py` + `--ping` CLIs (91 pass)
 - [x] C6 `runlog.py` + integration sim test + config type-checks + full sanity pass (94 pass)
-- [ ] Hardware smoke test on the real printer + Uno (manual; needs the applicator)
+- [x] C7 `main_printer.py` printer-only entry point (real printer, `dispenser=None`) + `--ping` (98 pass)
+- [ ] C8–C11 Pronterface-grade panel — see "In Progress" above
+- [~] Hardware smoke test on the real printer + Uno (manual; needs the applicator)
+      - [x] Printer link: `printer_serial --ping` on COM3 — M115/M400/M114 OK (2026-09-09)
+      - [ ] Uno link (`dispenser_serial --ping`) — Uno not connected yet
+      - [ ] `main.py --ping` — both at once — blocked on the Uno
 - [ ] Full hardware print completes with one operator-driven insert
 
 ### Phase 2 — magnet applicator (Arduino Uno + printer moves)

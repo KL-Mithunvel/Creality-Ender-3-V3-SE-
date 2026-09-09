@@ -237,3 +237,49 @@
   IEEE prior art and the bed-tray staging variant. Cross-linked RESEARCH.md from
   README, CLAUDE.md, BUILD_PLAN, and the disclosure draft.
 
+## 2026-09-09 — venv consolidation + first real-printer link test
+
+- Two virtualenvs existed side by side (`venv/` with deps, a fresh `.venv/` from
+  PyCharm with only pip). Consolidated on **`.venv`** per owner: deleted `venv/`,
+  installed `requirements-dev.txt` into `.venv`, `pytest` 94/94 green there.
+- Updated the venv instructions in `README.md` and `.CLAUDE/CLAUDE.md` to `.venv`
+  and `requirements-dev.txt`. `CLAUDE-COMMON.md` still shows generic `venv/` paths —
+  shared file, left untouched; raise with the owner if the template should change.
+- Owner sliced a real part (`Cube_PETG_7m59s.gcode`, Creality Print V7, 46 layers,
+  gitignored). Note: this slicer emits PrusaSlicer-style `;LAYER_CHANGE` blocks but a
+  malformed height line (`;:0.2`, not `;Z:0.2`) — `postprocess --z` won't match;
+  use `--layer N`. `--layer` matching is unaffected.
+- **Printer serial link verified on real hardware for the first time.** Printer
+  connected over USB-C (Uno not connected, applicator not built).
+  `python -m magnet_embed.links.printer_serial --ping` → `M115` handshake OK,
+  `M400`+`M114` OK, `COM3 connected; X-13.0 Y-15.0 Z0.0 nozzle 0.0/0.0` (unhomed,
+  hence negative coords). `config.yaml` already had `printer.port: COM3`.
+- Still pending: `main.py --ping` (blocks on the absent Uno), the applicator, the
+  offset measurement, and a full print with an insert.
+
+## 2026-09-09 — Phase 1.5 plan: printer-only mode + Pronterface-grade panel
+
+- Owner wants to stream a real print now (printer on the bench, Uno/applicator not)
+  and a Pronterface-style panel for bench work. Planned **C7–C11** in
+  `project/BUILD_PLAN.md` (new "Phase 1.5" section), one commit per chunk.
+- Scope guard recorded: **no `printrun` dependency, no copied Pronterface code** —
+  Printrun is GPLv3, this repo is MIT. UX inspiration only; streaming loop stays ours.
+  Ports stay config-driven (no UI port scanner). No temp graph / 3D preview.
+
+### C7 — printer-only entry point ✅ (98 tests)
+
+- `magnet_embed/main_printer.py` — third entry point (sim vs hardware stays chosen
+  by entry point, never a flag). Builds only the real `SerialPrinter`; passes
+  `dispenser=None` to `Controller` (both `Controller.connect()` and `insert_magnet`
+  already handle that — a sentinel falls back to the "Load a magnet" operator prompt).
+  `--ping` = printer-only smoke test; optional `gcode` positional pre-loads the panel.
+- `tests/test_main_printer.py` — 4 tests (ping OK / ping fail → rc 1 / GUI wires
+  `dispenser=None` + connects / connect failure → rc 1). Full suite 98 pass,
+  `py_compile` clean.
+- Docs synced: `README.md`, `.CLAUDE/CLAUDE.md` (entry points, module table,
+  Running section, Deployment table, smoke-test block), `TODO.md`.
+- Note: a later `main_printer --ping` on this machine returned
+  `printer FAIL: could not open port 'COM3'` — the printer was powered off / cable
+  out at that moment, not a code issue (the earlier `printer_serial --ping` on COM3
+  succeeded). Re-check the USB link before a real run.
+
