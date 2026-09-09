@@ -17,6 +17,8 @@ magnet_embed/config.local.yaml
 # Sliced / post-processed G-code — generated, not source
 *.gcode
 *.magnet.gcode
+# test fixtures are source — keep them
+!tests/data/*.gcode
 
 # Runtime output
 logs/

@@ -9,7 +9,7 @@ chunks. Each chunk: build → `pytest` green → stage → commit.
 |--|--|
 | Owner | kl mithunvel |
 | Created | 2026-09-09 |
-| Status | C1 in progress |
+| Status | C1 done (33 tests). C2 next. |
 | Overall plan | `project/PROJECT_PLAN.md` |
 | Architecture / rules | `.CLAUDE/CLAUDE.md` |
 
@@ -62,11 +62,18 @@ Host-controlled streaming to Marlin over USB serial:
 
 ## Chunks
 
-### C1 — Skeleton: config, sim printer, sentinel, runner (headless)  *(in progress)*
+### C1 — Skeleton: config, sim printer, sentinel, runner (headless)  ✅ *(commit after this section)*
 
 **Goal.** A runnable headless pipeline: load a `.gcode`, stream it through
 `SimPrinter`, detect the sentinel, log progress. Plus the structural interfaces
 everything else hangs off.
+
+**Done:** all files below created; 33 tests pass; `python -m magnet_embed.main_sim
+tests/data/sample.gcode` streams 18/25 lines (7 comments skipped) and logs one
+`SENTINEL HIT`. Deviations from the sketch: comment/word helpers live in
+`gcode/util.py` (shared by sim + runner); `PrinterLink`/`DispenserLink` are both in
+`links/base.py`; `requirements-dev.txt` split from `requirements.txt`; `config.py`
+does light required-key validation now (the C6 item is a fuller schema check).
 
 **Files**
 ```

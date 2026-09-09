@@ -58,7 +58,9 @@ involvement is acceptable at this stage.
 
 ## Running the System
 
-> Code does not exist yet — this section is the intended shape. Activate the venv first, always.
+> Build status: **C1 done** (`project/BUILD_PLAN.md`) — the sim pipeline below runs;
+> `postprocess`, the `insert_magnet` body, the Tkinter UI, and the real serial links
+> are still stubs / not built. Activate the venv first, always.
 
 ```bat
 :: one-time setup (Windows)
@@ -73,12 +75,16 @@ python magnet_embed\main_sim.py
 python -m pytest
 python -m py_compile magnet_embed\*.py
 
-:: G-code prep: inject the magnet sentinel at a layer, with pocket XY / seat Z / shear dir
+:: G-code prep: inject the magnet sentinel at a layer (postprocess lands in C3)
 python -m magnet_embed.gcode.postprocess part.gcode --layer 40 --xy 120.5 98 --seat-z 6.2 --shear +X -o part.magnet.gcode
 
-:: hardware run — only after the pre-hardware checklist passes
+:: hardware run (main.py + real serial land in C5) — after the pre-hardware checklist
 python magnet_embed\main.py
 ```
+
+Config: `magnet_embed/config.yaml` holds committed defaults; a git-ignored
+`magnet_embed/config.local.yaml` is deep-merged over it for real COM ports and the
+measured `magnet_tool_offset`.
 
 Simulation vs hardware is selected **by entry point**, not by a flag in code:
 `main_sim.py` wires the simulated links, `main.py` wires the serial links. Both read
@@ -169,7 +175,12 @@ hardware attached.
 
 ## Key Modules
 
-> Interfaces are the intended contract; implementations do not exist yet.
+> Built in C1: `config`, `state`, `exceptions`, `links/base` + `printer_sim` +
+> `dispenser_sim`, `gcode/util` + `gcode/sentinel` + `gcode/runner`, `main_sim`.
+> Stub until C2: `sequences/insert_magnet`. Not built: `postprocess` (C3),
+> `ui/panel` (C4), `printer_serial` / `dispenser_serial` / `main` (C5).
+> Actual module layout: comment/word helpers are in `gcode/util.py`; both ABCs are
+> in `links/base.py`.
 
 ### `links/printer_link.py` — `PrinterLink` (abstract)
 - `connect() -> None` — open the port, wait for the firmware banner. Raises `PrinterConnectionError`.

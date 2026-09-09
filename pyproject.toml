@@ -1,0 +1,13 @@
+[project]
+name = "magnet-embed"
+version = "0.1.0"
+description = "Semi-automated magnet-embedding print assistant for the Creality Ender-3 V3 SE"
+requires-python = ">=3.12"
+dependencies = ["pyyaml>=6,<7", "pyserial>=3.5,<4"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<10"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

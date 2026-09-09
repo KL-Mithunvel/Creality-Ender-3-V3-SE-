@@ -1,0 +1,58 @@
+# Default configuration.
+#
+# Machine-specific values (real COM ports, the MEASURED magnet-tool offset) belong
+# in a git-ignored config.local.yaml next to this file; it is deep-merged over these
+# defaults at load time. Do not put real ports or a tuned offset in this tracked file.
+
+printer:
+  port: COM3            # Windows device name; /dev/ttyUSB0 on Linux
+  baud: 115200          # Ender-3 V3 SE
+  ack_timeout_s: 30     # no `ok` and no busy/wait for this long -> AckTimeout
+
+dispenser:
+  port: COM4            # Arduino Uno
+  baud: 115200
+  reset_settle_s: 2.5   # wait out the Uno auto-reset after opening the port
+
+# Ender-3 V3 SE build volume (mm). Used for the insert-target envelope check.
+machine:
+  x_max: 220
+  y_max: 220
+  z_max: 250
+
+# Fixed offset of the applicator holding pole from the nozzle tip (mm).
+# MEASURE THIS on the real machine and override in config.local.yaml.
+# Sign of z: +z means the pole tip sits ABOVE the nozzle tip.
+magnet_tool_offset:
+  x: 30.0
+  y: 0.0
+  z: 5.0
+
+park:
+  x: 5.0                # where the nozzle parks while the operator works
+  y: 5.0
+  safe_z_lift_mm: 15.0  # clearance above the tracked max print Z before any travel
+
+temps:
+  standby_nozzle_c: 160 # drop the nozzle here during the pause
+  reheat_wait: true     # use M109 (wait) on resume
+
+retract:
+  mm: 3.0
+  feed: 2400            # mm/min
+
+press:
+  feed: 60              # mm/min, slow Z push into the pocket
+  dwell_ms: 500
+
+shear:
+  distance: 5.0         # mm lateral move to slide the pole off the seated magnet
+  feed: 1200            # mm/min
+
+prime:
+  mm: 2.0               # un-retract (+ a touch extra) on resume
+  feed: 300
+
+gcode:
+  sentinel_token: ";MAGNET_INSERT"
+  require_sentinel: false   # if true, a run that reaches EOF with no sentinel errors

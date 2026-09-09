@@ -1,0 +1,4 @@
+# Runtime dependencies. Pinned to a major version (PROJ_STARTER).
+# Migration to uv is planned — prefer uv when adding tooling.
+pyyaml>=6,<7
+pyserial>=3.5,<4

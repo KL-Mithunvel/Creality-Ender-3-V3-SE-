@@ -1,0 +1,76 @@
+"""Configuration loading: `config.yaml` + an optional git-ignored `config.local.yaml`.
+
+`config.local.yaml` sits next to `config.yaml` and is deep-merged over it at load
+time, so machine-specific values (real COM ports, the measured magnet-tool offset)
+never touch the tracked file.
+"""
+
+from __future__ import annotations
+
+import copy
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+DEFAULT_CONFIG_PATH = Path(__file__).parent / "config.yaml"
+
+#: (section, key) pairs that must be present after merging.
+_REQUIRED_KEYS: tuple[tuple[str, str], ...] = (
+    ("printer", "port"),
+    ("printer", "baud"),
+    ("printer", "ack_timeout_s"),
+    ("dispenser", "port"),
+    ("dispenser", "baud"),
+    ("machine", "x_max"),
+    ("machine", "y_max"),
+    ("machine", "z_max"),
+    ("magnet_tool_offset", "x"),
+    ("magnet_tool_offset", "y"),
+    ("magnet_tool_offset", "z"),
+    ("park", "x"),
+    ("park", "y"),
+    ("park", "safe_z_lift_mm"),
+    ("temps", "standby_nozzle_c"),
+    ("press", "feed"),
+    ("press", "dwell_ms"),
+    ("shear", "distance"),
+    ("shear", "feed"),
+    ("gcode", "sentinel_token"),
+)
+
+
+def _deep_merge(base: dict, over: dict) -> dict:
+    """Return a new dict: `over` merged onto `base`, recursing into nested dicts."""
+    out = copy.deepcopy(base)
+    for key, value in over.items():
+        if isinstance(value, dict) and isinstance(out.get(key), dict):
+            out[key] = _deep_merge(out[key], value)
+        else:
+            out[key] = copy.deepcopy(value)
+    return out
+
+
+def _validate(config: dict) -> None:
+    for section, key in _REQUIRED_KEYS:
+        if not isinstance(config.get(section), dict) or key not in config[section]:
+            raise KeyError(f"config is missing required key: {section}.{key}")
+
+
+def load_config(path: str | Path | None = None) -> dict[str, Any]:
+    """Load the base config, deep-merge `config.local.yaml` if present, validate.
+
+    `path` overrides the base file location (mainly for tests).
+    """
+    base_path = Path(path) if path is not None else DEFAULT_CONFIG_PATH
+    with open(base_path, "r", encoding="utf-8") as fh:
+        config = yaml.safe_load(fh) or {}
+
+    local_path = base_path.with_name("config.local.yaml")
+    if local_path.exists():
+        with open(local_path, "r", encoding="utf-8") as fh:
+            local = yaml.safe_load(fh) or {}
+        config = _deep_merge(config, local)
+
+    _validate(config)
+    return config

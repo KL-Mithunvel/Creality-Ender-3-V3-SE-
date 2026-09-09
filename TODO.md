@@ -17,6 +17,9 @@ criteria, risks). Architecture and rules: `.CLAUDE/CLAUDE.md`. Keep all three in
 - [x] Fill in `.CLAUDE/CLAUDE.md` with the real project brief; populate this file and README.
 - [x] Write `project/PROJECT_PLAN.md` (mechanism, insert state machine, Uno protocol,
       phases, risks, open questions); add `.gitignore`.
+- [x] Research host G-code streaming + write `project/BUILD_PLAN.md` (chunks C1–C6, protocol notes, references).
+- [x] **C1** — package scaffold, `config` loader, `SimPrinter`, `SimDispenser`, sentinel
+      parser, `GcodeRunner`, headless `main_sim`; 33 tests pass.
 
 ## Not Started
 
@@ -29,7 +32,7 @@ criteria, risks). Architecture and rules: `.CLAUDE/CLAUDE.md`. Keep all three in
 
 ### Phase 1 — Python host + Tkinter (operator-triggered steps)
 Chunked in `project/BUILD_PLAN.md` — one commit per chunk.
-- [ ] C1 Skeleton: config, `SimPrinter`, sentinel parser, `GcodeRunner`, headless `main_sim` + tests
+- [x] C1 Skeleton: config, `SimPrinter`, sentinel parser, `GcodeRunner`, headless `main_sim` + tests (33 pass)
 - [ ] C2 `sequences/insert_magnet.py` — SAVE…RESUME state machine against the sim + tests
 - [ ] C3 `gcode/postprocess.py` — `;MAGNET_INSERT X Y Z S<dir>` injection + CLI + tests
 - [ ] C4 Tkinter panel + threading mediator (Success / Retry / Abort modal)

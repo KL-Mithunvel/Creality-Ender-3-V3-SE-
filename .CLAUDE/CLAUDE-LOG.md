@@ -83,5 +83,29 @@
 - Decisions baked into the plan: plain-line streaming (no `M110`/checksums unless the
   printer requests resends); `M400` gates every insert-sequence phase; `SimPrinter`
   models the OctoPrint virtual-printer idea; hardware smoke test stays a manual step.
-- Next: execute C1.
+
+## 2026-09-09 — C1: skeleton, sim printer, sentinel, runner
+
+- Created `venv/`, installed pyyaml + pyserial + pytest; `requirements.txt` (runtime)
+  and `requirements-dev.txt` (pytest); `pyproject.toml` (pytest config, py>=3.12).
+- `magnet_embed/`: `exceptions.py` (shared error hierarchy), `state.py`
+  (`PrinterState`, `MagnetInsert`), `config.py` (deep-merge `config.yaml` +
+  `config.local.yaml`, required-key check) + committed `config.yaml`.
+- `gcode/util.py` (`strip_comment`, `parse_words`), `gcode/sentinel.py`
+  (`parse_sentinel` -> `MagnetInsert` | `None`, raises `SentinelParseError`),
+  `gcode/runner.py` (`GcodeRunner`: stream + `wait_ok` + `pause`/`resume`/`cancel`
+  via `threading.Event`, sentinel callback, skips pure-comment lines).
+- `links/base.py` (`PrinterLink`, `DispenserLink` ABCs), `links/printer_sim.py`
+  (`SimPrinter` — minimal G-code interpreter: G0/G1/G28/G90/G91/G92/M82/M83/
+  M104/M109/M140/M190, tracks XYZE + temps + modal state, `.sent` / `.moves` logs),
+  `links/dispenser_sim.py` (`SimDispenser`).
+- `sequences/insert_magnet.py` — signature + full state-machine docstring +
+  `NotImplementedError` (body is C2).
+- `main_sim.py` — headless: stream a file through `SimPrinter`, log `SENTINEL HIT`.
+- Tests (33, all pass): `test_config`, `test_sentinel`, `test_printer_sim`,
+  `test_runner`; fixture `tests/data/sample.gcode` (un-ignored in `.gitignore`).
+- Bug fixed mid-chunk: `SimPrinter` `G28 X` (bare axis letter) was homing all axes —
+  `_home_axes` now scans raw tokens, not `parse_words` output.
+- `main_sim tests/data/sample.gcode`: 18/25 lines sent, 1 sentinel, final pos correct.
+- Next: C2 — implement the `insert_magnet` state machine against the sim.
 
