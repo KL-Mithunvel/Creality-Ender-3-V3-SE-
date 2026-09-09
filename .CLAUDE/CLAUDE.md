@@ -279,17 +279,20 @@ hardware attached.
   `DispenserError`, `connect()` logs it, drops `self.dispenser` to `None`, and does
   not raise — the run continues printer-only. Default `False` keeps it strict.
 - Actions: `connect`, `load_gcode`, `jog`, `home`, `set_temp`, `send_command` (raw
-  G-code line; all no-ops while a run is active), `start_run`, `pause`, `resume`,
+  G-code line), `refresh_state` (poll `M105`+`M114`), `extrude` (mm+feed, negative =
+  retract) — all no-ops while a run is active — plus `start_run`, `pause`, `resume`,
   `cancel`, `answer_prompt`.
+- Properties: `connected`, `progress` → `(current_line, total_lines)`.
 - Event kinds: `log`, `state` (a `PrinterState`), `prompt` (`"dispense"`/`"confirm"`),
   `done`, `error`.
 
 ### `ui/panel.py` — `ControlPanel` + `run_gui(controller)`
 - Thin Tkinter view over a `Controller`. Connect, load G-code, run/pause/resume/cancel,
-  jog (0.1/1/10 mm) + home + raw G-code entry **idle only**, set temps, read-only log,
-  live position/temp line. `_show_prompt` opens a modal **Success / Retry / Abort**
-  (or **Ready / Abort**) dialog that calls `controller.answer_prompt`. Drains
-  `poll_events()` every 120 ms.
+  a run-progress bar, jog (0.1/1/10 mm) + home + raw G-code entry + extrude/retract
+  **idle only**, set temps, "Plan magnet insert…", read-only log, live position/temp
+  line. Auto-refreshes state every `ui.idle_poll_s` while connected + idle.
+  `_show_prompt` opens a modal **Success / Retry / Abort** (or **Ready / Abort**)
+  dialog that calls `controller.answer_prompt`. Drains `poll_events()` every 120 ms.
 
 ---
 

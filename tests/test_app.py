@@ -192,3 +192,62 @@ def test_send_command_surfaces_printer_error(config):
     ctl.printer.command = boom
     ctl.send_command("M104 S999")
     assert any(k == "error" for k, _ in ctl.poll_events())
+
+
+# --- C18: idle polling, extrude/retract, progress -------------------
+
+def test_refresh_state_polls_temps_when_idle(config):
+    ctl = _ctl(config)
+    ctl.poll_events()
+    ctl.refresh_state()
+    assert "M105" in ctl.printer.sent
+    assert any(k == "state" for k, _ in ctl.poll_events())
+
+
+def test_refresh_state_noop_when_not_connected(config):
+    ctl = Controller(SimPrinter(), SimDispenser(), config)   # never connected
+    ctl.refresh_state()
+    assert ctl.printer.sent == []
+
+
+def test_refresh_state_noop_while_running(config):
+    ctl = _ctl(config, delay=0.03)
+    ctl.load_gcode(SAMPLE)
+    ctl.start_run()
+    assert _wait(lambda: ctl.running)
+    before = list(ctl.printer.sent)
+    ctl.refresh_state()
+    assert ctl.printer.sent == before
+    _pump_until(ctl, "done", answer="success")
+
+
+def test_extrude_then_retract(config):
+    ctl = _ctl(config)
+    ctl.extrude(5.0, 300.0)
+    ctl.extrude(-2.0, 300.0)
+    assert "M83" in ctl.printer.sent
+    assert "G1 E5 F300" in ctl.printer.sent
+    assert "G1 E-2 F300" in ctl.printer.sent
+
+
+def test_extrude_ignored_while_running(config):
+    ctl = _ctl(config, delay=0.03)
+    ctl.load_gcode(SAMPLE)
+    ctl.start_run()
+    assert _wait(lambda: ctl.running)
+    before = list(ctl.printer.sent)
+    ctl.extrude(5.0, 300.0)
+    assert ctl.printer.sent == before
+    _pump_until(ctl, "done", answer="success")
+
+
+def test_progress_zero_then_advances_then_final(config):
+    ctl = _ctl(config, delay=0.02)
+    assert ctl.progress == (0, 0)
+    ctl.load_gcode(SAMPLE)
+    ctl.start_run()
+    assert _wait(lambda: ctl.progress[0] > 0)
+    _pump_until(ctl, "done", answer="success")
+    assert _wait(lambda: not ctl.running)
+    done, total = ctl.progress
+    assert total > 0 and done == total

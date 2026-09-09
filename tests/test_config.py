@@ -51,3 +51,21 @@ def test_missing_required_key_raises(tmp_path):
     base.write_text("printer: {port: COM3}\n", encoding="utf-8")
     with pytest.raises(KeyError):
         load_config(base)
+
+
+def test_ui_idle_poll_default_present():
+    assert load_config()["ui"]["idle_poll_s"] == 2.0
+
+
+def test_validate_rejects_bad_idle_poll():
+    import pytest
+
+    from magnet_embed.config import _validate
+
+    cfg = load_config()
+    cfg["ui"]["idle_poll_s"] = -1
+    with pytest.raises(ValueError):
+        _validate(cfg)
+    cfg["ui"]["idle_poll_s"] = "fast"
+    with pytest.raises(ValueError):
+        _validate(cfg)

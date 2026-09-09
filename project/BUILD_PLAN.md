@@ -622,7 +622,15 @@ prepend a real `M0`. Panel: "Plan magnet insert…" button, idle + file-loaded o
 
 ---
 
-### C18 — Panel finish: idle polling, extrude/retract, progress (was C10–C12)  🟢
+### C18 — Panel finish: idle polling, extrude/retract, progress (was C10–C12)  ✅
+
+**Done:** `Controller.connected` + `Controller.progress` `(current_line, total_lines)`;
+`refresh_state()` (`M105` then `_emit_state()`, no-op disconnected/running);
+`extrude(mm, feed)` (`M83` + `G1 E…`, negative = retract, no-op running). Panel:
+`ttk.Progressbar` + `line N / total (pct)` (→ `done N/N` on the `done` event), a
+Filament frame (mm/feed + Extrude/Retract), and a panel-timer idle poll every
+`ui.idle_poll_s` (config key, validated ≥ 0; `0` disables). `test_app.py` +6,
+`test_config.py` +2. 167 tests.
 
 - `Controller.refresh_state()` — `M105` then `_emit_state()`; panel-timer driven
   (no new thread) every `ui.idle_poll_s` when connected + idle; `0` disables.

@@ -13,7 +13,7 @@ criteria, risks). Architecture and rules: `.CLAUDE/CLAUDE.md`. Keep all three in
       - [x] C15 `sequences/geometry.py` — `plan_insert_moves`/`check_envelope` factored out of `insert_magnet` (146 tests)
       - [x] C16 `viz/preview.py` — matplotlib toolpath + insert-motion animation; `main.py --preview` (152 tests)
       - [x] C17 `ui/plan_dialog.py` — place the sentinel + save `*.magnet.gcode` (159 tests)
-      - [ ] C18 idle polling + extrude/retract + run-progress bar (was C10–C12)
+      - [x] C18 idle polling + extrude/retract + run-progress bar (was C10–C12) (167 tests)
       - [ ] C19 end-to-end workflow test + doc sync + delete `PROTO_PLAN.md`
 - [ ] Hardware: build the clip-on applicator (magazine + escapement + holding pole + mount);
       wire the Arduino Uno + servo; measure `magnet_tool_offset`; run the manual smoke test

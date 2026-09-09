@@ -57,12 +57,23 @@ class Controller:
         self._answers: "queue.Queue[str]" = queue.Queue()
         self._worker: threading.Thread | None = None
         self._runlog: RunLog | None = None
+        self._connected = False
 
     # --- state -------------------------------------------------------
 
     @property
     def running(self) -> bool:
         return self._worker is not None and self._worker.is_alive()
+
+    @property
+    def connected(self) -> bool:
+        return self._connected
+
+    @property
+    def progress(self) -> tuple[int, int]:
+        """(current line, total lines) of the active/last run; (0, 0) before any run."""
+        r = self.runner
+        return (r.current_line, r.total_lines) if r is not None else (0, 0)
 
     def poll_events(self) -> list[Event]:
         """Return and clear every event queued since the last call (call from the UI)."""
@@ -90,6 +101,7 @@ class Controller:
                     "magnet inserts will fall back to the operator prompt",
                 )
                 self.dispenser = None
+        self._connected = True
         self._emit("log", "connected")
         self._emit_state()
 
@@ -142,6 +154,26 @@ class Controller:
             return
         if reply:
             self._emit("log", f"< {reply}")
+        self._emit_state()
+
+    def refresh_state(self) -> None:
+        """Poll temps + position. No-op when disconnected or while a run is active."""
+        if not self._connected or self.running:
+            return
+        try:
+            self.printer.command("M105")
+        except (PrinterError, AckTimeout, ResendRequested) as exc:
+            self._emit("error", f"{type(exc).__name__}: {exc}")
+            return
+        self._emit_state()
+
+    def extrude(self, mm: float, feed: float) -> None:
+        """Extrude `mm` at `feed` mm/min (negative `mm` = retract). Idle only."""
+        if self.running:
+            self._emit("log", "extrude/retract ignored - a run is active")
+            return
+        self.printer.command("M83")
+        self.printer.command(f"G1 E{mm:g} F{feed:g}")
         self._emit_state()
 
     def start_run(self) -> None:

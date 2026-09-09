@@ -88,6 +88,10 @@ def _validate(config: dict) -> None:
     if standby is not None and (isinstance(standby, bool) or not isinstance(standby, (int, float))):
         raise ValueError(f"config temps.standby_nozzle_c must be a number or null, got {standby!r}")
 
+    poll = config.get("ui", {}).get("idle_poll_s", 0)
+    if isinstance(poll, bool) or not isinstance(poll, (int, float)) or poll < 0:
+        raise ValueError(f"config ui.idle_poll_s must be a number >= 0, got {poll!r}")
+
 
 def load_config(path: str | Path | None = None) -> dict[str, Any]:
     """Load the base config, deep-merge `config.local.yaml` if present, validate.

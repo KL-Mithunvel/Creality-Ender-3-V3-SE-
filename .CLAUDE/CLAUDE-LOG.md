@@ -382,3 +382,13 @@
   before the sentinel for microSD prints.
 - Panel: "Plan magnet insert…" button (idle + file loaded).
 - `tests/test_plan_dialog.py` (6) + 1 postprocess test.
+
+### C18 — panel finish: idle poll, extrude/retract, progress ✅ (167 tests)
+
+- `Controller`: `connected` flag, `progress` (current_line/total_lines),
+  `refresh_state()` (M105 + state emit), `extrude(mm, feed)` (negative = retract).
+  All idle-only.
+- Panel: run-progress bar + `line N / total (pct)` -> `done N/N`; Filament frame
+  (mm/feed + Extrude/Retract); panel-timer idle poll every `ui.idle_poll_s`.
+- New config key `ui.idle_poll_s` (default 2.0, validated >= 0, 0 disables).
+- `test_app.py` +6, `test_config.py` +2. (Old C9-C12 fully absorbed now.)

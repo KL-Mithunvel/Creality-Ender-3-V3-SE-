@@ -60,6 +60,9 @@ prime:
 sequence:
   max_retries: 3           # operator "retry" answers allowed before the insert aborts
 
+ui:
+  idle_poll_s: 2.0         # panel auto-refreshes position + temps this often while idle; 0 disables
+
 gcode:
   sentinel_token: ";MAGNET_INSERT"
   require_sentinel: false   # if true, a run that reaches EOF with no sentinel errors
