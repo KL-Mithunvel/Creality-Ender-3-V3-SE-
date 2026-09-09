@@ -501,7 +501,14 @@ the owner can drive sim / printer / hardware from one command.
 
 ---
 
-### C14 — Toolpath model (`gcode/toolpath.py`)  🟢
+### C14 — Toolpath model (`gcode/toolpath.py`)  ✅
+
+**Done:** `parse_toolpath(path) -> Toolpath`; `Segment(p0, p1, extruding, layer,
+feed)`; layer→Z table from `postprocess._detect_layers` markers, falling back to a
+Z-rise heuristic for unmarked files (the PrusaSlicer fixture has `;Z:` comments but
+no Z moves — markers carry it). `Toolpath` exposes `layer_count`, `move_count`,
+`top_z`, `extrude_distance`/`travel_distance`, `est_time_s`, `segments_in_layer`,
+`layer_for_z`. `tests/test_toolpath.py` (9). 139 tests.
 
 **Goal.** Turn a `.gcode` file into something drawable and measurable.
 

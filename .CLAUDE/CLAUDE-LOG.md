@@ -339,3 +339,11 @@
 - `Controller.send_command(line)` — raw G-code, idle only, `> line` / `< reply` to
   the log, `PrinterError`/`AckTimeout`/`ResendRequested` → `error` event. Panel got
   a "Send G-code" entry + button, disabled while running.
+
+### C14 — `gcode/toolpath.py` ✅ (139 tests)
+
+- `parse_toolpath(path) -> Toolpath`: ordered `Segment`s (travel vs extrude),
+  modal G90/G91/M82/M83/G92/G28 aware. Layer→Z table from `_detect_layers`
+  markers, Z-rise heuristic fallback when a file has none. `Toolpath` helpers:
+  counts, `top_z`, extrude/travel distance, rough `est_time_s`, `segments_in_layer`,
+  `layer_for_z`. `tests/test_toolpath.py` (9).
