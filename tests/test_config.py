@@ -25,7 +25,10 @@ def test_local_override_is_merged(tmp_path):
         "machine: {x_max: 220, y_max: 220, z_max: 250}\n"
         "magnet_tool_offset: {x: 1, y: 2, z: 3}\n"
         "park: {x: 5, y: 5, safe_z_lift_mm: 15}\n"
+        "travel: {feed: 6000}\n"
         "temps: {standby_nozzle_c: 160}\n"
+        "retract: {mm: 3, feed: 2400}\n"
+        "prime: {mm: 2, feed: 300}\n"
         "press: {feed: 60, dwell_ms: 500}\n"
         "shear: {distance: 5, feed: 1200}\n"
         "gcode: {sentinel_token: ';MAGNET_INSERT'}\n",

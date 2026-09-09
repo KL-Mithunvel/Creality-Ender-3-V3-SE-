@@ -20,6 +20,8 @@ criteria, risks). Architecture and rules: `.CLAUDE/CLAUDE.md`. Keep all three in
 - [x] Research host G-code streaming + write `project/BUILD_PLAN.md` (chunks C1–C6, protocol notes, references).
 - [x] **C1** — package scaffold, `config` loader, `SimPrinter`, `SimDispenser`, sentinel
       parser, `GcodeRunner`, headless `main_sim`; 33 tests pass.
+- [x] **C2** — `sequences/insert_magnet.py` full SAVE…RESUME state machine (M400-gated,
+      envelope check, retry/abort, temp + position + mode restore); 44 tests pass.
 
 ## Not Started
 
@@ -33,7 +35,7 @@ criteria, risks). Architecture and rules: `.CLAUDE/CLAUDE.md`. Keep all three in
 ### Phase 1 — Python host + Tkinter (operator-triggered steps)
 Chunked in `project/BUILD_PLAN.md` — one commit per chunk.
 - [x] C1 Skeleton: config, `SimPrinter`, sentinel parser, `GcodeRunner`, headless `main_sim` + tests (33 pass)
-- [ ] C2 `sequences/insert_magnet.py` — SAVE…RESUME state machine against the sim + tests
+- [x] C2 `sequences/insert_magnet.py` — SAVE…RESUME state machine against the sim + tests (44 pass)
 - [ ] C3 `gcode/postprocess.py` — `;MAGNET_INSERT X Y Z S<dir>` injection + CLI + tests
 - [ ] C4 Tkinter panel + threading mediator (Success / Retry / Abort modal)
 - [ ] C5 Real serial: `printer_serial` + `dispenser_serial` + Marlin rx parser + tests

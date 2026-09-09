@@ -98,6 +98,7 @@ class SimPrinter(PrinterLink):
         s = self.state
         if "F" in w:
             s.feedrate = w["F"]
+        moved = any(axis in w for axis in ("X", "Y", "Z", "E"))
         if s.absolute_xyz:
             for axis, attr in (("X", "x"), ("Y", "y"), ("Z", "z")):
                 if axis in w:
@@ -108,7 +109,8 @@ class SimPrinter(PrinterLink):
             s.z += w.get("Z", 0.0)
         if "E" in w:
             s.e = w["E"] if s.absolute_e else s.e + w["E"]
-        self.moves.append((s.x, s.y, s.z, s.e))
+        if moved:
+            self.moves.append((s.x, s.y, s.z, s.e))
 
     def _home_axes(self, code: str) -> None:
         s = self.state

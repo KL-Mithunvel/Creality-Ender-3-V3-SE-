@@ -37,6 +37,9 @@ temps:
   standby_nozzle_c: 160 # drop the nozzle here during the pause
   reheat_wait: true     # use M109 (wait) on resume
 
+travel:
+  feed: 6000            # mm/min for non-print rapid moves (park, approach, resume)
+
 retract:
   mm: 3.0
   feed: 2400            # mm/min
@@ -52,6 +55,9 @@ shear:
 prime:
   mm: 2.0               # un-retract (+ a touch extra) on resume
   feed: 300
+
+sequence:
+  max_retries: 3           # operator "retry" answers allowed before the insert aborts
 
 gcode:
   sentinel_token: ";MAGNET_INSERT"

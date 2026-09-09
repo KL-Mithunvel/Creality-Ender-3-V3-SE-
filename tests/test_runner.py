@@ -25,7 +25,7 @@ def test_streams_to_completion_and_detects_sentinel(config):
     assert runner.finished
     assert runner.sentinels_seen == 1
     assert len(calls) == 1 and isinstance(calls[0], MagnetInsert)
-    assert calls[0].pocket_xy == (30.0, 30.0)
+    assert calls[0].pocket_xy == (60.0, 60.0)
     assert calls[0].shear_dir == "+X"
 
 
@@ -47,7 +47,7 @@ def test_final_printer_state_reflects_the_stream(config):
     printer, runner, _ = _make(config)
     runner.run()
     st = printer.query_state()
-    assert (st.x, st.y) == (50.0, 50.0)   # last move in the fixture
+    assert (st.x, st.y) == (80.0, 80.0)   # last move in the fixture
     assert st.nozzle_target == 0          # M104 S0 at the end
 
 

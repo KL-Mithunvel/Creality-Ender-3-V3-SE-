@@ -58,9 +58,9 @@ involvement is acceptable at this stage.
 
 ## Running the System
 
-> Build status: **C1 done** (`project/BUILD_PLAN.md`) — the sim pipeline below runs;
-> `postprocess`, the `insert_magnet` body, the Tkinter UI, and the real serial links
-> are still stubs / not built. Activate the venv first, always.
+> Build status: **C1–C2 done** (`project/BUILD_PLAN.md`) — the sim pipeline below runs
+> the full insert sequence against `SimPrinter` + `SimDispenser`. `postprocess` (C3),
+> the Tkinter UI (C4), and the real serial links (C5) are not built yet. venv first, always.
 
 ```bat
 :: one-time setup (Windows)
@@ -144,7 +144,7 @@ SAVE      record X Y Z E, feedrates, G90/G91, M82/M83, nozzle + bed temp
 PARK      M83; retract 2–5 mm; Z-hop to safe clearance; nozzle → standby_nozzle_temp_c (bed stays hot)
 DISPENSE  dispenser.dispense()  (Phase 1: operator prompt) — magnet moves to the holding pole
 APPROACH  move XY to  pocket_xy − magnet_tool_offset.xy  at safe Z;  host envelope check → abort if outside
-PRESS     Z down to  seat_z + magnet_tool_offset.z  at press.feed;  brief dwell
+PRESS     Z down to  seat_z − magnet_tool_offset.z  at press.feed;  brief dwell
 SHEAR     lateral move shear.distance in shear_dir at shear.feed — pole slides off the seated magnet
 LIFT      Z to safe clearance;  move clear of the part
 ASK       prompt() → "success" | "retry" | "abort"
@@ -175,12 +175,12 @@ hardware attached.
 
 ## Key Modules
 
-> Built in C1: `config`, `state`, `exceptions`, `links/base` + `printer_sim` +
-> `dispenser_sim`, `gcode/util` + `gcode/sentinel` + `gcode/runner`, `main_sim`.
-> Stub until C2: `sequences/insert_magnet`. Not built: `postprocess` (C3),
-> `ui/panel` (C4), `printer_serial` / `dispenser_serial` / `main` (C5).
-> Actual module layout: comment/word helpers are in `gcode/util.py`; both ABCs are
-> in `links/base.py`.
+> Built (C1–C2): `config`, `state`, `exceptions`, `links/base` + `printer_sim` +
+> `dispenser_sim`, `gcode/util` + `gcode/sentinel` + `gcode/runner`,
+> `sequences/insert_magnet` (full state machine), `main_sim`.
+> Not built: `postprocess` (C3), `ui/panel` (C4), `printer_serial` /
+> `dispenser_serial` / `main` (C5). Actual layout: comment/word helpers are in
+> `gcode/util.py`; both ABCs are in `links/base.py`.
 
 ### `links/printer_link.py` — `PrinterLink` (abstract)
 - `connect() -> None` — open the port, wait for the firmware banner. Raises `PrinterConnectionError`.
@@ -216,12 +216,14 @@ hardware attached.
 
 ### `sequences/insert_magnet.py`
 - `insert_magnet(printer: PrinterLink, dispenser: DispenserLink | None, mi: MagnetInsert,
-  config: dict, prompt: Callable[[], str]) -> None`
-  — `mi` carries the parsed sentinel fields (`pocket_xy`, `seat_z`, `shear_dir`);
-  `prompt()` returns `"success" | "retry" | "abort"`.
-- Runs the state machine in Architecture → Insert sequence.
+  config: dict, prompt: Callable[[str], str]) -> None`
+  — `mi` carries the parsed sentinel fields; `prompt("dispense")` returns
+  `"ready" | "abort"` (only used when `dispenser` is `None`), `prompt("confirm")`
+  returns `"success" | "retry" | "abort"`.
+- Runs the state machine in Architecture → Insert sequence; every phase gated with `M400`.
+- Raises `OutOfEnvelopeError` (before any move), `SequenceAborted`, or the dispenser's error.
 - **No `G28` anywhere** — every move is commanded and tracked (Development Rule 11).
-- **Must** leave the printer resumable on any failure: restore temp, no partial moves, re-raise. Never swallow.
+- On any failure: nozzle target restored (or set to 0 on operator abort), re-raised. Never swallowed.
 
 ### `ui/panel.py`
 - `ControlPanel(root, printer, dispenser, config)` — connect, jog (±X/Y/Z step) and
@@ -243,11 +245,13 @@ hardware attached.
   `GcodeRunner` matches the line by prefix (after `.strip()`) against
   `config['gcode']['sentinel_token']` (default `;MAGNET_INSERT`), parses the fields into
   a `MagnetInsert`, fires the insert sequence, and does **not** send the line to the printer.
-- **Magnet-tool offset.** The applicator's holding pole sits at a fixed
-  `magnet_tool_offset: {x, y, z}` from the nozzle (measured empirically, sign included).
-  `insert_magnet` targets `pocket_xy − (offset.x, offset.y)` for the carriage and
-  `seat_z + offset.z` for Z. The offset shrinks the reachable area — the host checks the
-  target is in-envelope and **aborts the sequence with the print still paused** if not.
+- **Magnet-tool offset.** `magnet_tool_offset: {x, y, z}` is **(holding-pole tip) −
+  (nozzle tip)**, measured empirically with signs. `+z` means the pole tip sits above
+  the nozzle tip. `insert_magnet` drives the carriage to `pocket_xy − (offset.x,
+  offset.y)` and presses the nozzle down to `seat_z − offset.z` (so the pole tip lands
+  at `seat_z`). The offset shrinks the reachable area and can make a low pocket
+  unreachable (`seat_z − offset.z < 0`) — the host checks every target in-envelope and
+  **aborts the sequence with the print still paused** if not.
 - **Press and shear are printer moves, not servo moves.** The Arduino servo only
   *dispenses* one magnet to the holding pole. The **printer** presses (Z down to seat
   depth) and shears (short **lateral** move so the pole slides off the seated magnet).

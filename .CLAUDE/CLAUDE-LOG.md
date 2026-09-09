@@ -107,5 +107,28 @@
 - Bug fixed mid-chunk: `SimPrinter` `G28 X` (bare axis letter) was homing all axes —
   `_home_axes` now scans raw tokens, not `parse_words` output.
 - `main_sim tests/data/sample.gcode`: 18/25 lines sent, 1 sentinel, final pos correct.
-- Next: C2 — implement the `insert_magnet` state machine against the sim.
+
+## 2026-09-09 — C2: insert-magnet state machine
+
+- Implemented `sequences/insert_magnet.py` — SAVE → PARK → DISPENSE → APPROACH →
+  PRESS → SHEAR → LIFT → ASK → RESUME, every phase gated with `M400`, no `G28`.
+- `prompt(stage)` now takes a stage: `"dispense"` (`ready`/`abort`, only when no
+  dispenser) and `"confirm"` (`success`/`retry`/`abort`). Retry re-runs from
+  DISPENSE up to `sequence.max_retries`, then aborts. Abort sets nozzle to 0; any
+  other error restores the saved nozzle target — both re-raise (Dev Rule 5).
+- Fixed the offset convention: `magnet_tool_offset` is **(pole tip − nozzle tip)**,
+  so press Z = `seat_z − offset.z`. Updated CLAUDE.md Key Conventions + diagram.
+- Envelope check runs before ANY motion and covers approach XY, shear XY, press Z,
+  safe Z (Dev Rule 12).
+- `config.yaml`: added `travel.feed` and `sequence.max_retries`; `retract` / `prime`
+  now required keys. `SimPrinter._move` no longer records a move for `G1 F…` only.
+- `main_sim` runs the real sequence with `--confirm {success,retry,abort}`.
+- Fixture `sample.gcode` coords made envelope-legal (`;MAGNET_INSERT X60 Y60 Z6 S+X`).
+- 44 tests pass (11 new in `test_insert_magnet.py`); `py_compile` clean.
+- Next: C3 — `gcode/postprocess.py` (sentinel injection + CLI).
+
+## Pending user requests (not yet done)
+- Write a plain-language "how it all works" MD doc (detailed but simple).
+- Review `docs/Invention DisclosureForm -Khurana & Khurana.docx` and help fill it
+  for a patent application (owner + a friend, via a college teacher).
 

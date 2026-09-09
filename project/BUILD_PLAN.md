@@ -9,7 +9,7 @@ chunks. Each chunk: build → `pytest` green → stage → commit.
 |--|--|
 | Owner | kl mithunvel |
 | Created | 2026-09-09 |
-| Status | C1 done (33 tests). C2 next. |
+| Status | C1–C2 done (44 tests). C3 next. |
 | Overall plan | `project/PROJECT_PLAN.md` |
 | Architecture / rules | `.CLAUDE/CLAUDE.md` |
 
@@ -124,11 +124,20 @@ tests/
 
 ---
 
-### C2 — Insert-magnet state machine (against the sim)
+### C2 — Insert-magnet state machine (against the sim)  ✅
 
 **Goal.** Fill in `sequences/insert_magnet.py` — the full `SAVE → PARK → DISPENSE →
 APPROACH → PRESS → SHEAR → LIFT → ASK → RESUME` machine, driven by `MagnetInsert`
 + config, gated by `M400`, verified against `SimPrinter`.
+
+**Done:** `sequences/insert_magnet.py` implemented (44 tests total, 11 new).
+Decisions/deviations: `prompt(stage)` takes a stage arg (`"dispense"` /
+`"confirm"`) instead of a no-arg callable; offset convention fixed to
+`(pole − nozzle)` so press Z is `seat_z − offset.z`; move helpers kept inline
+(`_send`, `_fmt`) rather than a `moves.py` module; `config.yaml` gained `travel`,
+`sequence`, and `retract`/`prime` are now required keys; `SimPrinter._move` no
+longer logs a "move" for feedrate-only `G1 F…` lines; `main_sim` runs the real
+sequence with a `--confirm` canned answer.
 
 **Files:** `sequences/insert_magnet.py`, `gcode/moves.py` (small G-code builders:
 `travel`, `z_hop`, `retract`, `set_temp`, `wait_moves`), `sequences/envelope.py`
