@@ -28,11 +28,21 @@ involvement is acceptable at this stage.
   extruder, ~250 mm/s ceiling.
 - **Host:** the owner's **Windows 11** PC, tethered to the printer over USB-C for
   the whole print. Python + Tkinter control panel. No Raspberry Pi in the loop.
-- **Magnet placer:** a **separate microcontroller** (ESP32 or RP2040 / Pico) that
-  drives the physical placer actuator. The host talks to it over a second USB
-  serial port. Actuation lands in Phase 2; Phase 1 is operator-triggered.
+- **Magnet applicator (add-on):** a **clip-on toolhead add-on** carrying a magnet
+  magazine. An **Arduino Uno** (second USB serial port) drives **one servo that
+  dispenses a single magnet** onto a holding pole at the tool tip. The **printer's
+  own motion** then presses the magnet into the pocket and shears the tool away
+  from it. Automation lands in Phase 2; Phase 1 triggers the steps by operator.
 - **License:** see `LICENSE`. **Entry points:** `magnet_embed/main_sim.py`
   (simulation) and `magnet_embed/main.py` (hardware). **Min runtime:** Python 3.12.
+
+### Working assumptions
+
+- The applicator **clips on and off**. For now, assume it **does not hinder normal
+  printing** — no tool-lift servo, no nozzle Z-clearance handling for the add-on.
+  Revisit if that assumption breaks.
+- Only **one magnet per part** for the prototype (the design keeps room for more).
+- The operator is present for every magnet insert.
 
 ### Chosen control approach (and the options considered)
 
@@ -63,8 +73,8 @@ python magnet_embed\main_sim.py
 python -m pytest
 python -m py_compile magnet_embed\*.py
 
-:: G-code prep: inject the magnet sentinel at a layer / height
-python -m magnet_embed.gcode.postprocess part.gcode --layer 40 -o part.magnet.gcode
+:: G-code prep: inject the magnet sentinel at a layer, with pocket XY / seat Z / shear dir
+python -m magnet_embed.gcode.postprocess part.gcode --layer 40 --xy 120.5 98 --seat-z 6.2 --shear +X -o part.magnet.gcode
 
 :: hardware run — only after the pre-hardware checklist passes
 python magnet_embed\main.py
@@ -82,39 +92,63 @@ the same `magnet_embed/config.yaml`.
 
 | Path | Role |
 |------|------|
-| `magnet_embed/config.yaml` | All ports, baud rates, park coordinates, safe-Z, temps, sentinel token. Nothing hardware-specific is hardcoded elsewhere. |
-| `magnet_embed/main.py` | Hardware entry point — real printer + real placer MCU. |
-| `magnet_embed/main_sim.py` | Dev entry point — simulated printer + simulated placer. |
-| `magnet_embed/state.py` | `PrinterState` dataclass (position, temps, connection, run status). |
-| `magnet_embed/links/printer_link.py` | Abstract `PrinterLink` — `connect`, `send_line`, `wait_ok`, `disconnect`. |
+| `magnet_embed/config.yaml` | All ports, baud, park/safe-Z, temps, the magnet-tool XYZ offset, press/shear distances + feeds, sentinel token. Nothing hardware-specific is hardcoded elsewhere. |
+| `magnet_embed/main.py` | Hardware entry point — real printer + real Arduino dispenser. |
+| `magnet_embed/main_sim.py` | Dev entry point — simulated printer + simulated dispenser. |
+| `magnet_embed/state.py` | `PrinterState` dataclass (position, temps, connection, run status) + `MagnetInsert` (parsed sentinel fields). |
+| `magnet_embed/links/printer_link.py` | Abstract `PrinterLink` — `connect`, `send_line`, `wait_ok`, `query_state`, `disconnect`. |
 | `magnet_embed/links/printer_serial.py` | Real printer link — `pyserial` / `printrun.printcore`, 115200, `ok`-handshake, temp parsing. |
 | `magnet_embed/links/printer_sim.py` | Simulated printer — consumes G-code, tracks X/Y/Z/E and temps, emits `ok`, raises the same exceptions as the real link. |
-| `magnet_embed/links/placer_link.py` | Abstract `PlacerLink` — `ping`, `place`, error reporting. |
-| `magnet_embed/links/placer_serial.py` | Real placer link — serial to the ESP32/Pico, ASCII line protocol. |
-| `magnet_embed/links/placer_sim.py` | Simulated placer — returns `DONE` / `ERR` like the real MCU. |
-| `magnet_embed/gcode/runner.py` | `GcodeRunner` — streams lines, waits for `ok`, detects the sentinel, handles pause / resume / cancel. |
-| `magnet_embed/gcode/postprocess.py` | Inserts the sentinel comment line at a chosen layer index or Z height. |
-| `magnet_embed/sequences/insert_magnet.py` | The park → lift → (optional temp drop) → place → wipe → resume routine. |
-| `magnet_embed/ui/panel.py` | Tkinter panel — connect, home, jog, load G-code, run, pause/resume, "Insert Magnet", live log. |
-| `tests/` | `pytest` — runner, postprocess, insert sequence, printer sim. |
+| `magnet_embed/links/dispenser_link.py` | Abstract `DispenserLink` — `ping`, `dispense`, `reset`, `status`. |
+| `magnet_embed/links/dispenser_serial.py` | Real dispenser link — newline ASCII serial to the Arduino Uno; handles the Uno's ~2 s auto-reset on connect. |
+| `magnet_embed/links/dispenser_sim.py` | Simulated dispenser — returns `OK DISPENSE` / `ERR` like the real Uno. |
+| `magnet_embed/gcode/runner.py` | `GcodeRunner` — streams lines, waits for `ok`, detects + parses the sentinel, handles pause / resume / cancel. |
+| `magnet_embed/gcode/postprocess.py` | Inserts the `;MAGNET_INSERT X Y Z S<dir>` sentinel comment at a chosen layer / height. |
+| `magnet_embed/sequences/insert_magnet.py` | The `SAVE → PARK → DISPENSE → APPROACH → PRESS → SHEAR → LIFT → ASK → RESUME` state machine. |
+| `magnet_embed/ui/panel.py` | Tkinter panel — connect, jog/home (pre-print only), load G-code, run, pause/resume/cancel, "Insert Magnet", the Success/Retry/Abort prompt, live log. |
+| `dispenser_fw/` | Arduino Uno sketch for the magazine servo (Phase 2). |
+| `tests/` | `pytest` — runner, postprocess, insert state machine, printer sim, dispenser sim. |
 
 ### Data flow
 
 ```
 Creality Print / Cura ──slice──► part.gcode
                                      │
-              gcode/postprocess.py inserts  ";MAGNET_INSERT"  at layer N
+   gcode/postprocess.py inserts  ";MAGNET_INSERT X Y Z S<dir>"  at layer N
                                      │
                                      ▼
    ┌──────────────── host: Windows 11 PC (Python) ─────────────────┐
-   │  ui/panel.py ──► gcode/runner.py ──► links/printer_serial ────┼──USB-C serial 115200──►  Ender-3 V3 SE
-   │                        │                                      │
-   │       on ";MAGNET_INSERT":                                    │
-   │                        └──► sequences/insert_magnet ──────────┤
-   │                                    │                          │
-   │                                    └──► links/placer_serial ──┼──USB serial──►  Placer MCU (ESP32 / Pico)   [Phase 2]
-   └──────────────────────────────────────────────────────────────┘
+   │  ui/panel.py ─► gcode/runner.py ─► links/printer_serial ──────┼─USB-C 115200─►  Ender-3 V3 SE
+   │                       │                                       │   (press + shear = printer moves)
+   │      on ";MAGNET_INSERT …":                                   │
+   │                       └─► sequences/insert_magnet ────────────┤
+   │                                   │                           │
+   │                                   └─► links/dispenser_serial ─┼─USB serial──►  Arduino Uno ─► magazine servo
+   └──────────────────────────────────────────────────────────────┘                                   [Phase 2]
 ```
+
+### Insert sequence (state machine)
+
+Fired when `GcodeRunner` sees the sentinel; streaming is paused (the printer just
+holds position and temp — no `M0`/`M25`). Full detail with tunable values in
+`project/PROJECT_PLAN.md` → Phase 2.
+
+```
+SAVE      record X Y Z E, feedrates, G90/G91, M82/M83, nozzle + bed temp
+PARK      M83; retract 2–5 mm; Z-hop to safe clearance; nozzle → standby_nozzle_temp_c (bed stays hot)
+DISPENSE  dispenser.dispense()  (Phase 1: operator prompt) — magnet moves to the holding pole
+APPROACH  move XY to  pocket_xy − magnet_tool_offset.xy  at safe Z;  host envelope check → abort if outside
+PRESS     Z down to  seat_z + magnet_tool_offset.z  at press.feed;  brief dwell
+SHEAR     lateral move shear.distance in shear_dir at shear.feed — pole slides off the seated magnet
+LIFT      Z to safe clearance;  move clear of the part
+ASK       prompt() → "success" | "retry" | "abort"
+           retry → operator makes safe, then re-run from DISPENSE (or APPROACH if the magnet is still on the pole)
+           abort → heaters to safe, print stays paused (resumable) or cancelled
+RESUME    nozzle → print temp, M109;  XY → saved pos at safe Z;  Z → saved Z;
+          un-retract; prime + wipe; restore G90 / M82 / feedrates
+```
+
+No `G28` anywhere — every move after `SAVE` is commanded and tracked (Dev Rule 11).
 
 ### Threading model
 
@@ -126,7 +160,7 @@ Creality Print / Cura ──slice──► part.gcode
 
 ### Simulation vs real
 
-Chosen by entry point. `printer_sim` / `placer_sim` produce the same return
+Chosen by entry point. `printer_sim` / `dispenser_sim` produce the same return
 shapes and raise the same exception types as the serial links, so `GcodeRunner`,
 `insert_magnet`, and the UI are exercised end-to-end on the dev machine with no
 hardware attached.
@@ -145,61 +179,88 @@ hardware attached.
 - `disconnect() -> None`.
 - I/O: serial port from `config.yaml`.
 
-### `links/placer_link.py` — `PlacerLink` (abstract)
+### `links/dispenser_link.py` — `DispenserLink` (abstract)
 - `ping() -> bool` — `PING` → `PONG`.
-- `place() -> None` — run one place cycle. Raises `PlacerError` on `ERR <reason>`.
-- I/O: second serial port from `config.yaml`.
+- `dispense() -> None` — feed one magnet to the holding pole. Raises `DispenserError` on `ERR DISPENSE <reason>`.
+- `reset() -> None` — servo to home / loaded position.
+- `status() -> dict` — servo angle, dispensed count, last command.
+- I/O: second serial port (Arduino Uno) from `config.yaml`. The real link waits out
+  the Uno's ~2 s auto-reset after `connect()` and `PING`s until `PONG`.
 
 ### `gcode/runner.py` — `GcodeRunner`
-- `__init__(link: PrinterLink, gcode_path: str, on_sentinel: Callable, config: dict)`.
-- `run() -> None` — stream every line, `wait_ok` after each; when a stripped line equals the
-  sentinel token, call `on_sentinel()` instead of sending it, then continue.
+- `__init__(link: PrinterLink, gcode_path: str, on_sentinel: Callable[[MagnetInsert], None], config: dict)`.
+- `run() -> None` — stream every line, `wait_ok` after each; when a stripped line starts with the
+  sentinel token, parse it into a `MagnetInsert` and call `on_sentinel(mi)` instead of sending it.
 - `pause()`, `resume()`, `cancel()` — thread-safe.
 - Side effects: reads the G-code file, writes to the printer link, appends to the run log.
-- Exceptions: `AckTimeout`, `SentinelNotFound` (if `require_sentinel` and EOF reached first).
+- Exceptions: `AckTimeout`, `SentinelNotFound` (if `require_sentinel` and EOF reached first), `SentinelParseError`.
 
 ### `gcode/postprocess.py`
-- `inject_sentinel(in_path, out_path, *, layer: int | None, z_mm: float | None) -> int`
-  — returns the source line number where the sentinel was inserted.
+- `inject_sentinel(in_path, out_path, *, layer: int | None, z_mm: float | None,
+  pocket_xy: tuple[float, float], seat_z: float, shear: str) -> int`
+  — inserts `;MAGNET_INSERT X<px> Y<py> Z<seat_z> S<shear>` at the chosen layer and
+  returns the source line number. Coordinates are in bed space.
 - Understands Cura / Creality Print (`;LAYER:<n>`) and PrusaSlicer (`;LAYER_CHANGE` + `;Z:<h>`) markers.
-- CLI: `python -m magnet_embed.gcode.postprocess <file> --layer N | --z H [-o OUT]`.
+- CLI: `python -m magnet_embed.gcode.postprocess <file> (--layer N | --z H) --xy PX PY --seat-z SZ --shear +X|-X|+Y|-Y [-o OUT]`.
 
 ### `sequences/insert_magnet.py`
-- `insert_magnet(printer: PrinterLink, placer: PlacerLink | None, config: dict, confirm: Callable[[], bool]) -> None`
-- Steps: record current XYZ/temp → move to `park_xy` at `safe_z_lift_mm` above the part →
-  optionally set nozzle to `pause_nozzle_temp_c` → `placer.place()` **or** `confirm()` (Phase 1) →
-  optional nozzle wipe → restore temp → return head to the saved position → hand control back to the runner.
+- `insert_magnet(printer: PrinterLink, dispenser: DispenserLink | None, mi: MagnetInsert,
+  config: dict, prompt: Callable[[], str]) -> None`
+  — `mi` carries the parsed sentinel fields (`pocket_xy`, `seat_z`, `shear_dir`);
+  `prompt()` returns `"success" | "retry" | "abort"`.
+- Runs the state machine in Architecture → Insert sequence.
+- **No `G28` anywhere** — every move is commanded and tracked (Development Rule 11).
 - **Must** leave the printer resumable on any failure: restore temp, no partial moves, re-raise. Never swallow.
 
 ### `ui/panel.py`
-- `ControlPanel(root, printer, placer, config)` — buttons/fields for connect, home (`G28`),
-  jog (±X/Y/Z step), set temps, load G-code, run, pause/resume/cancel, "Insert Magnet" (manual trigger),
-  and a scrolling serial log.
+- `ControlPanel(root, printer, dispenser, config)` — connect, jog (±X/Y/Z step) and
+  home **only while not printing**, set temps, load G-code, run, pause/resume/cancel,
+  "Insert Magnet" (manual trigger), the modal **Success / Retry / Abort** prompt, and a
+  scrolling serial log.
 
 ---
 
 ## Key Conventions
 
-- **Magnet sentinel — `;MAGNET_INSERT`.** A bare G-code **comment** line inserted by
-  `gcode/postprocess.py` at the chosen layer. Because it is a comment, the file still
-  prints normally straight from microSD. `GcodeRunner` compares each line **after
-  `.strip()`** against `config['gcode']['sentinel_token']` (default `;MAGNET_INSERT`);
-  on a match it fires the insert sequence and does **not** send the line to the printer.
-- **Layer / height targeting.** `postprocess.inject_sentinel` finds the insertion point
-  from slicer layer markers: `;LAYER:<n>` (Cura / Creality Print) or `;LAYER_CHANGE`
-  followed by `;Z:<height>` (PrusaSlicer). `--layer` matches the marker index; `--z`
-  matches the first layer whose height ≥ the value.
-- **Placer MCU protocol** — newline-terminated ASCII over serial, deliberately dumb:
-  - host → MCU: `PING\n`, `PLACE\n`
-  - MCU → host: `PONG\n`, `DONE\n`, or `ERR <reason>\n`
-- **Config precedence.** Everything hardware-specific (COM ports, baud, `park_xy`,
-  `safe_z_lift_mm`, `pause_nozzle_temp_c`, `sentinel_token`) lives in
-  `magnet_embed/config.yaml` and is passed as parameters. Simulated links ignore the
-  port keys. There are **no** hardcoded ports, coordinates, or temps in link or
-  sequence files.
-- **Magnet handling (operator procedure, not code).** Mark polarity before insertion.
-  Keep the pause short — nozzle ooze and part shift grow with pause time. If magnets
-  weaken across prints, move from N-grade to a high-temp grade (N42SH/UH).
+- **Magnet sentinel — `;MAGNET_INSERT X<px> Y<py> Z<seat_z> S<dir>`.** A G-code
+  **comment** line inserted by `gcode/postprocess.py` at the chosen layer, so the file
+  still prints unchanged straight from microSD. Fields:
+  - `X`, `Y` — pocket centre in bed coordinates
+  - `Z` — magnet seat height (pocket floor + magnet thickness)
+  - `S` — shear direction, one of `+X -X +Y -Y` (the way with clearance to slide the pole off)
+
+  `GcodeRunner` matches the line by prefix (after `.strip()`) against
+  `config['gcode']['sentinel_token']` (default `;MAGNET_INSERT`), parses the fields into
+  a `MagnetInsert`, fires the insert sequence, and does **not** send the line to the printer.
+- **Magnet-tool offset.** The applicator's holding pole sits at a fixed
+  `magnet_tool_offset: {x, y, z}` from the nozzle (measured empirically, sign included).
+  `insert_magnet` targets `pocket_xy − (offset.x, offset.y)` for the carriage and
+  `seat_z + offset.z` for Z. The offset shrinks the reachable area — the host checks the
+  target is in-envelope and **aborts the sequence with the print still paused** if not.
+- **Press and shear are printer moves, not servo moves.** The Arduino servo only
+  *dispenses* one magnet to the holding pole. The **printer** presses (Z down to seat
+  depth) and shears (short **lateral** move so the pole slides off the seated magnet).
+  Shear is lateral — never straight up — so the magnet is not pulled back out of the pocket.
+- **Layer / height targeting.** `postprocess` finds the insertion point from slicer
+  markers: `;LAYER:<n>` (Cura / Creality Print) or `;LAYER_CHANGE` + `;Z:<height>`
+  (PrusaSlicer). `--layer` matches the marker index; `--z` the first layer with height ≥ value.
+- **Dispenser (Arduino Uno) protocol** — newline-terminated ASCII, deliberately dumb:
+  - host → Uno: `PING`, `DISPENSE`, `RESET`, `STATUS`
+  - Uno → host: `PONG`, `OK DISPENSE`, `OK RESET`, `STATUS servo=<deg> count=<n> last=<cmd>`,
+    `ERR DISPENSE <reason>`, `WARN IDLE` (watchdog safed the servo after host silence)
+  - Opening the port resets the Uno (~2 s bootloader); the host waits, flushes, then
+    `PING`s until `PONG` before trusting it.
+- **Config precedence.** Everything hardware-specific — COM ports, baud, `park_xy`,
+  `safe_z_lift_mm`, `standby_nozzle_temp_c`, `magnet_tool_offset`, `press.*`, `shear.*`,
+  `sentinel_token` — lives in `magnet_embed/config.yaml` and is passed as parameters.
+  Simulated links ignore the port keys. No hardcoded ports, coordinates, or temps in
+  link / sequence files.
+- **Magnet polarity is deterministic** — the holding pole forces each dispensed
+  magnet's orientation, so a consistently loaded magazine yields consistent polarity in
+  the part. No per-magnet marking; verify the magazine loading direction instead.
+- **Pause hygiene.** Retract before parking; drop the nozzle to `standby_nozzle_temp_c`
+  during the pause / operator prompt; keep the bed hot; un-retract + prime + wipe on
+  resume. Keep the pause as short as the operator check allows.
 
 ---
 
@@ -209,15 +270,15 @@ hardware attached.
 |------|----------|-------|
 | `.CLAUDE/*.md`, `project/PROJECT_PLAN.md`, `README.md`, `TODO.md` | yes | Project docs. `CLAUDE-COMMON.md` is shared — never edit here. |
 | `.gitignore` | yes | Excludes `.idea/`, `venv/`, `__pycache__/`, generated G-code, `logs/`, `config.local.yaml`. |
-| `magnet_embed/config.yaml` | yes | Committed with safe defaults; local COM ports may be overridden — see below. |
+| `magnet_embed/config.yaml` | yes | Committed with safe defaults; local COM ports / offsets may be overridden — see below. |
+| `dispenser_fw/` | yes | Phase 2 — Arduino Uno sketch for the magazine servo. |
 | `*.gcode`, `*.magnet.gcode` | **no** — gitignore | Sliced parts and post-processed output. Generated, not committed. |
 | `logs/*.log` | **no** — gitignore | Per-run serial transcripts. |
 | `requirements.txt` | yes | Pinned deps (`pip freeze` after installs). |
-| MCU firmware source (`placer_fw/`) | yes | Phase 2 — ESP32/Pico sketch. |
 
-If a local machine needs different COM ports than the committed `config.yaml`, use a
-gitignored `config.local.yaml` (loaded over `config.yaml` when present) rather than
-editing the tracked file.
+If a local machine needs different COM ports or a tuned offset, use a gitignored
+`config.local.yaml` (loaded over `config.yaml` when present) rather than editing the
+tracked file.
 
 ---
 
@@ -229,8 +290,14 @@ editing the tracked file.
   only inside `printer_serial.py`.
 - **Two hardware dependencies**, each with a simulated twin (CLAUDE-COMMON rule 2):
   - Ender-3 V3 SE over USB-C serial → `printer_sim.py`
-  - Placer MCU over USB serial → `placer_sim.py`
-- **No GPIO on the host.** All physical actuation lives on the placer MCU.
+  - Arduino Uno (magazine servo) over USB serial → `dispenser_sim.py`
+- **No GPIO on the host.** All actuation is either a printer G-code move or the Uno's servo.
+- **Arduino Uno quirks:** opening the serial port auto-resets the board (~2 s); the servo
+  needs its own 5–6 V supply (not the Uno's regulator) with a common ground; the sketch
+  runs a watchdog that safes the servo if the host goes quiet.
+- **Magnets near steel:** the V3 SE bed is a magnetic spring-steel flex plate and the
+  hotend is steel — keep the magnet held by the pole until sheared, and bench-test how
+  close it can get to the plate before it snatches.
 - **Windows sleep must be disabled during a print** — the USB tether has to stay live.
   Use `powercfg /change standby-timeout-ac 0` or presentation mode for the session.
 
@@ -246,37 +313,39 @@ and switching entry point — there is no code transfer.
 | OS | Windows 11 | Windows 11 (same PC) |
 | Python | 3.12 venv | 3.12 venv (same) |
 | Printer | `links/printer_sim.py` | Ender-3 V3 SE, USB-C, `COM?`, 115200 |
-| Placer | `links/placer_sim.py` | ESP32 / Pico, USB, `COM?` (Phase 2) |
+| Dispenser | `links/dispenser_sim.py` | Arduino Uno, USB, `COM?` (Phase 2) |
 | Entry | `python magnet_embed\main_sim.py` | `python magnet_embed\main.py` |
 
 ### Pre-hardware checklist (must pass in simulation first)
 
 - [ ] `python -m pytest` — zero failures
-- [ ] `main_sim.py` runs a real sliced sample file end-to-end; the sentinel fires a
-      simulated place; the print completes
+- [ ] `main_sim.py` runs a real sliced sample file end-to-end; the sentinel fires the
+      full insert state machine; the print completes
 - [ ] Jog / home / set-temp verified against the sim
-- [ ] Printer COM port (and placer COM port, Phase 2) identified in Device Manager and
-      set in `config.yaml` / `config.local.yaml`
+- [ ] Printer COM port (and Arduino Uno COM port, Phase 2) identified in Device Manager
+      and set in `config.yaml` / `config.local.yaml`
+- [ ] Magnet-tool XYZ offset measured and in config; shear direction has real clearance
+- [ ] Magnet grade decided; magazine loaded consistently (polarity is set by the holding pole)
 - [ ] Stock firmware backup on hand
-- [ ] Magnet grade and polarity-marking procedure decided
 - [ ] Windows sleep disabled for the session
 
 ### Hardware smoke test
 
 ```bat
-python -m magnet_embed.links.printer_serial --ping   :: expect firmware banner / ok to M115
-python -m magnet_embed.links.placer_serial  --ping   :: expect PONG          (Phase 2)
+python -m magnet_embed.links.printer_serial    --ping   :: expect firmware banner / ok to M115
+python -m magnet_embed.links.dispenser_serial  --ping   :: expect PONG          (Phase 2)
 ```
 
-Then: short air-print (Z raised) with a sentinel near layer 2 — head parks, place
-fires, print resumes and completes.
+Then: short air-print (Z raised, no filament) with a sentinel near layer 2 — head
+parks, magnet dispensed, controlled press + lateral shear run, print resumes and completes.
 
 ### Config differences between simulation and hardware
 
 | Setting | Simulation | Hardware | Where |
 |---------|-----------|----------|-------|
 | `printer.port` | ignored | `COM?` | `config.yaml` / `config.local.yaml` |
-| `placer.port` | ignored | `COM?` | same |
+| `dispenser.port` | ignored | `COM?` | same |
+| `magnet_tool_offset` | any value | measured | `config.local.yaml` |
 | link classes | `*_sim` | `*_serial` | chosen by entry point |
 
 ---
@@ -291,7 +360,7 @@ _None — no code written yet. Record every rule violation here (file + line) as
 
 Referenced by number in TODO items and commit messages.
 
-1. **Dev-machine first.** Every feature is verified against `printer_sim` / `placer_sim`
+1. **Dev-machine first.** Every feature is verified against `printer_sim` / `dispenser_sim`
    before it runs on the printer. (CLAUDE-COMMON — Deployment Model)
 2. **Every hardware link has a simulated twin** producing the same return shapes and
    raising the same exception types. (CLAUDE-COMMON)
@@ -299,18 +368,27 @@ Referenced by number in TODO items and commit messages.
    all from `config.yaml`. (CLAUDE-COMMON)
 4. **G-code files stay valid for standalone microSD printing.** The sentinel is a
    comment line, never a real command. (project)
-5. **The Insert Magnet sequence leaves the printer resumable on any error** — restore
-   nozzle temp, no partial moves, re-raise. No silently swallowed exceptions.
+5. **The insert sequence leaves the printer resumable on any error** — restore nozzle
+   temp, no partial moves, re-raise. No silently swallowed exceptions.
    (PROJ_STARTER — proper error handling)
 6. **Minimise pause duration**; nozzle-temp handling during the pause is explicit in
    the sequence. (project — ooze / part-shift risk)
-7. **Never drive motion into the part during insertion** — the head parks clear first.
-   (project — layer-shift risk)
+7. **Only the magnet tool contacts the part during insertion** — the nozzle parks clear
+   first; the only commanded contact moves are the controlled `PRESS` (Z to seat depth
+   at `press.feed`) and the lateral `SHEAR`. (project — layer-shift / damage risk)
 8. **Tests in `tests/`, `pytest`**, covering the happy path plus key failures
-   (ack timeout, sentinel missing, placer `ERR`). (PROJ_STARTER)
+   (ack timeout, sentinel missing / unparseable, dispenser `ERR`, out-of-envelope target). (PROJ_STARTER)
 9. **venv active for every Python command**; deps pinned in `requirements.txt`;
    flag `uv` when touching packaging. (CLAUDE-COMMON)
 10. **Docs updated in the same commit as the code** they describe. (CLAUDE-COMMON)
+11. **No `G28` / homing during a print.** After `SAVE`, every move is commanded and
+    tracked; return to the saved coordinates. Homing mid-print risks driving the nozzle
+    through the part. (project — collision risk)
+12. **The insert target must be in-envelope after the tool offset is applied** — the
+    sequence checks and aborts (print stays paused) rather than commanding an
+    out-of-range move. (project)
+13. **Press + shear logic lives on the host, not the Uno.** The Arduino sketch only
+    dispenses; keep it dumb. (project)
 
 ---
 
@@ -325,29 +403,32 @@ Legend: 🔴 Bug / rule violation  |  🟡 Incomplete feature  |  🟢 Not start
 ### Phase 0 — mechanical proof (no host code)
 - 🟢 Design a test part with a magnet pocket (top N layers form the seal cap)
 - 🟢 Slice with slicer pause-at-layer (`M0`), insert magnet by hand, verify encapsulation and post-print magnet strength
-- 🟢 Decide magnet grade and polarity-marking procedure
+- 🟢 Decide magnet grade; settle pocket retention strategy (press-fit / adhesive / stripper)
 
-### Phase 1 — Python host + Tkinter, operator-triggered place
+### Phase 1 — Python host + Tkinter, operator-triggered steps
 - 🟢 Repo scaffold: `magnet_embed/` package, venv, `requirements.txt`, `config.yaml`
 - 🟢 `PrinterLink` abstract + `printer_sim`
-- 🟢 `GcodeRunner`: stream + `ok` handshake + pause/resume/cancel + sentinel detection
-- 🟢 `gcode/postprocess.py`: sentinel injection (Cura + PrusaSlicer markers) + CLI
-- 🟢 `sequences/insert_magnet.py` with an operator-confirm callback
-- 🟢 `ui/panel.py` Tkinter control panel
-- 🟢 Tests: runner, postprocess, insert sequence, printer sim
+- 🟢 `GcodeRunner`: stream + `ok` handshake + pause/resume/cancel + sentinel detect & parse
+- 🟢 `gcode/postprocess.py`: `;MAGNET_INSERT X Y Z S<dir>` injection (Cura + PrusaSlicer markers) + CLI
+- 🟢 `sequences/insert_magnet.py` state machine with operator prompts standing in for the Uno
+- 🟢 `ui/panel.py` Tkinter panel incl. the Success / Retry / Abort prompt
+- 🟢 Tests: runner, postprocess, insert state machine, printer sim
 - 🟢 `printer_serial` real link + hardware smoke test on the V3 SE
 
-### Phase 2 — actuated placer MCU
-- 🟢 Choose MCU (ESP32 vs Pico) and placer kinematics (servo arm / solenoid + magazine)
-- 🟢 MCU firmware: `PING` / `PLACE` serial protocol
-- 🟢 `PlacerLink` abstract + `placer_sim` + `placer_serial`
-- 🟢 Wire `insert_magnet` to call `placer.place()` instead of the operator prompt
-- 🟢 End-to-end hardware run: print → auto-place → encapsulate
+### Phase 2 — magnet applicator (Arduino Uno + printer moves)
+- 🟢 Finalise applicator mechanics: magazine escapement, holding-pole strength vs pocket retention
+- 🟢 Measure the magnet-tool XYZ offset; pick shear distance + direction
+- 🟢 Arduino Uno sketch: `PING` / `DISPENSE` / `RESET` / `STATUS` + idle watchdog
+- 🟢 `DispenserLink` abstract + `dispenser_sim` + `dispenser_serial` (handles Uno auto-reset)
+- 🟢 Wire `dispenser.dispense()` into the `DISPENSE` state, operator prompt as fallback
+- 🟢 Bench tests: servo alone, cold "air insert", magnet-near-plate, idle-heater timeout
+- 🟢 End-to-end hardware run: print → dispense → press → shear → operator OK → resume
 
 ### Phase 3 — hardening (later)
 - 🟢 Nozzle wipe / temp-drop tuning
-- 🟢 Failure recovery (placer jam, magnet missing, mid-pause disconnect)
-- 🟢 Multi-magnet parts
+- 🟢 Failure recovery (magazine jam, magnet missing, mid-pause disconnect)
+- 🟢 Multi-magnet parts (multiple sentinels, per-sentinel park + shear)
+- 🟢 Optional hall sensor to confirm deposit instead of the operator check
 
 ---
 
@@ -372,9 +453,12 @@ changes with the owner.
 ### Project-Specific Overrides
 
 - **Two USB serial devices**, not one: the printer (`printer.port`) and, from Phase 2,
-  the placer MCU (`placer.port`). Keep their configuration and their simulated twins
-  separate.
-- **The printer is a working machine.** Prefer approaches that need no firmware
-  reflash. Klipper / custom firmware is out of scope unless the owner reopens it.
-- **Safety first in the insert sequence** — Development Rules 5–7 are hard rules, not
-  guidelines.
+  the Arduino Uno dispenser (`dispenser.port`). Keep their config and simulated twins separate.
+- **Press + shear are printer moves; the Uno only dispenses.** Don't push press/shear
+  logic into the Arduino sketch (Development Rule 13).
+- **The applicator is a clip-on add-on.** For now assume it clips on and does not hinder
+  normal printing (no tool-lift servo, no nozzle Z-clearance handling). Revisit if that breaks.
+- **The printer is a working machine.** Prefer approaches that need no firmware reflash.
+  Klipper / custom firmware is out of scope unless the owner reopens it.
+- **Safety first in the insert sequence** — Development Rules 5–7 and 11–12 are hard
+  rules, not guidelines.

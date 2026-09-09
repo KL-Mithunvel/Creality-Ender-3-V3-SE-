@@ -38,5 +38,31 @@
 - Cross-linked the plan from `.CLAUDE/CLAUDE.md` (TODO section + Data Files),
   `TODO.md`, and `README.md`; `TODO.md` now mirrors the plan checklist.
 - Committed everything to `main` (was still just the template + the earlier
-  uncommitted doc rewrite). `.idea/` excluded via `.gitignore`.
+  uncommitted doc rewrite). `.idea/` excluded via `.gitignore`. (27ebf21)
+
+## 2026-09-09 — Mechanism design nailed down; docs updated to match
+
+- Worked through the physical sequence with the owner. Corrections from the earlier
+  assumptions:
+  - Dispenser MCU is an **Arduino Uno** (not ESP32/Pico). Renamed `placer*` →
+    `dispenser*` throughout the docs.
+  - The **servo only dispenses** one magnet from a magazine onto a holding pole.
+  - **Press and shear are printer moves**, not servo moves — Z press to seat depth,
+    then a short **lateral** shear so the pole slides off (vertical shear would pull
+    the magnet back out). Shear direction carried in the sentinel.
+  - **No `G28` mid-print** — save state, restore exact coordinates. Added Dev Rules
+    11 (no homing), 12 (in-envelope check), 13 (Uno stays dumb).
+  - Magnet **polarity is deterministic** via the holding pole — no per-magnet marking.
+  - Assumption recorded: the applicator is a **clip-on** add-on and for now is assumed
+    not to hinder normal printing (no tool-lift servo, no nozzle Z-clearance handling).
+- Extended the sentinel to `;MAGNET_INSERT X<px> Y<py> Z<seat_z> S<dir>` and wrote the
+  full `SAVE → PARK → DISPENSE → APPROACH → PRESS → SHEAR → LIFT → ASK → RESUME` state
+  machine into `.CLAUDE/CLAUDE.md` (Architecture) and `project/PROJECT_PLAN.md` (Phase 2).
+- Rewrote `project/PROJECT_PLAN.md`: §2 assumptions, §3 mechanism + decisions +
+  Uno protocol, §4 state machine, §5 Phase 1/2 task tables, §6 tool-offset/reachable
+  area, §7 risks, §8 open questions.
+- Updated `.CLAUDE/CLAUDE.md` (overview, module table, data flow, insert-sequence
+  subsection, Key Modules, Key Conventions, Platform Constraints, Deployment Notes,
+  Dev Rules, Phase 2 TODO, overrides), `TODO.md`, and `README.md` to match.
+- Still no code — `magnet_embed/` does not exist yet.
 
