@@ -6,11 +6,15 @@ criteria, risks). Architecture and rules: `.CLAUDE/CLAUDE.md`. Keep all three in
 
 ## In Progress
 
-- [ ] **C9–C12** Pronterface-grade panel (`project/BUILD_PLAN.md` Phase 1.5):
-      - [ ] C9 manual G-code entry (`Controller.send_command` + panel field)
-      - [ ] C10 live idle polling (auto temp/position refresh while connected + idle)
-      - [ ] C11 extrude / retract controls
-      - [ ] C12 run progress (line N / total, %)
+- [ ] **Phase 1.6 — C13–C19** (`project/BUILD_PLAN.md`): one root `main.py`,
+      bring-your-own-G-code, visual insert planning. Absorbs the paused C9–C12.
+      - [ ] C13 root `main.py` + mode dispatch + `Controller.send_command`
+      - [ ] C14 `gcode/toolpath.py` — parse a slice into segments + layer table
+      - [ ] C15 `sequences/geometry.py` — `plan_insert_moves` factored out of `insert_magnet`
+      - [ ] C16 `viz/preview.py` — matplotlib toolpath + insert-motion animation
+      - [ ] C17 `ui/plan_dialog.py` — place the sentinel + save `*.magnet.gcode`
+      - [ ] C18 idle polling + extrude/retract + run-progress bar (was C10–C12)
+      - [ ] C19 end-to-end workflow test + doc sync + delete `PROTO_PLAN.md`
 - [ ] Hardware: build the clip-on applicator (magazine + escapement + holding pole + mount);
       wire the Arduino Uno + servo; measure `magnet_tool_offset`; run the manual smoke test
 - [ ] Patent: fill the `[INVENTORS TO COMPLETE]` sections of `docs/INVENTION_DISCLOSURE_DRAFT.md`,

@@ -9,7 +9,7 @@ chunks. Each chunk: build → `pytest` green → stage → commit.
 |--|--|
 | Owner | kl mithunvel |
 | Created | 2026-09-09 |
-| Status | **C1–C8 done, 105 tests.** Phase 1 software + printer-only entry point + `main` runs without the Uno. **C9–C12 (Pronterface-grade panel) in progress — see Phase 1.5 below.** Magnet-flow hardware smoke test still pending the applicator build. |
+| Status | **C1–C8 done, 105 tests.** Phase 1 software + printer-only entry point + `main` runs without the Uno. **Phase 1.6 (C13–C19) is the active plan** — one root entry point, bring-your-own-G-code, visual insert planning; it absorbs the paused C9–C12. Magnet-flow hardware smoke test still pending the applicator build. |
 | Overall plan | `project/PROJECT_PLAN.md` |
 | Architecture / rules | `.CLAUDE/CLAUDE.md` |
 
@@ -435,6 +435,187 @@ updates a `ttk.Progressbar` + label. `runner.total_lines` counts every file line
 **Tests / acceptance**
 - `Controller.progress` is `(0, 0)` before a run, `(sent, total)` during, final counts after.
 - Manual: bar advances while `main_sim --gui` streams `tests/data/sample.gcode`.
+
+---
+
+## Phase 1.6 — One entry point, bring-your-own-G-code, visual insert planning
+
+**Why.** The owner slices in Creality Print already and brings a finished `.gcode`.
+There is no value in the host doing (or shelling out to) a slicer. What is missing
+is: a single `python main.py` to run everything, a way to *see* the sliced toolpath
+and the magnet-insert motion before committing to hardware, a GUI to place the
+sentinel and save the file, and the panel polish (raw G-code, idle polling,
+extrude/retract, progress) that was scoped as C9–C12.
+
+**Supersedes.** `project/PROTO_PLAN.md` (the never-executed `proto/` rewrite) — its
+one durable decision, *drop the slicer*, is folded in here. We **extend
+`magnet_embed/`**; the 105-test core is not rewritten. `PROTO_PLAN.md` is deleted in C19.
+
+**Scope guard.** No slicing, no `printrun` dependency, no firmware reflash. Sentinel
+stays an inert `;MAGNET_INSERT` comment so the saved file still prints from microSD
+(Dev Rule 4). Arduino sketch stays deferred — every real run is `dispenser=None`
+with the operator "Load a magnet" prompt until the owner says otherwise. `matplotlib`
+is added to `requirements.txt` (flag `uv` per Dev Rule 9).
+
+**Target workflow — what `main.py` does.**
+
+```
+launch main.py [--sim | --printer | --hardware]        mode chosen by flag, not by code
+  │
+  ├─ general controls   jog X/Y/Z · home · set temps · raw G-code · extrude/retract · live readout
+  ├─ Import G-code       a finished slice from Creality Print
+  ├─ Visualise           full toolpath from that file (2D layer view + 3D)
+  ├─ Plan magnet insert  pocket X/Y · seat Z · shear dir · layer/height
+  │                        → envelope check → watch the insert motion simulated
+  ├─ Save                <stem>.magnet.gcode  (sentinel comment, microSD-valid) → auto-loads
+  ├─ Run                 stream the saved file over serial to the printer
+  └─ At the sentinel     park → operator dispenses → press → shear → Success / Retry / Abort → resume
+```
+
+**One commit per chunk; `pytest` green + docs in the same commit; `Co-authored-by` trailer.**
+
+---
+
+### C13 — Root `main.py` + mode dispatch + `send_command`  🟢
+
+**Goal.** `python main.py` at the repo root runs the whole thing. After this chunk
+the owner can drive sim / printer / hardware from one command.
+
+- `main.py` (repo root): `--sim` (default), `--printer`, `--hardware`; plus `--ping`,
+  `--no-gui`, `--config`, optional `gcode` positional. Builds the matching links
+  (reuse `magnet_embed.main._build` / `main_sim` wiring — refactor the shared bits
+  into `magnet_embed/entry.py` so there is no copy-paste), makes a `Controller`,
+  launches the panel. `magnet_embed/main*.py` stay working as thin shims that call
+  `entry`.
+- `Controller.send_command(line)` (was C9): strip; ignore blank; ignore + log while
+  running; `> line` / `< reply` to the log; `_emit_state()`; `PrinterError` /
+  `AckTimeout` → `error` event, never raises into the Tk callback.
+- Panel: a raw-command Entry + Send row, `<Return>` bound, disabled while running.
+
+**Tests / acceptance**
+- `main.py --sim --no-gui --ping` connects the sims and exits 0; `--printer` /
+  `--hardware` build the right link classes (assert types with a patched serial).
+- `send_command("M114")` → one `printer.command("M114")`, `>`/`<` in the log; blank
+  → no call; while running → ignored with a log line; `PrinterError` → `error` event.
+- `python -m magnet_embed.main_sim --gui` still works (shim).
+
+---
+
+### C14 — Toolpath model (`gcode/toolpath.py`)  🟢
+
+**Goal.** Turn a `.gcode` file into something drawable and measurable.
+
+- `parse_toolpath(path) -> Toolpath`: ordered segments `(x0,y0,z0)-(x1,y1,z1)`,
+  `extruding: bool` (E advancing with XY), `layer: int`, `feed`. Layer table from
+  `;LAYER:` / `;LAYER_CHANGE`+`;Z:` (reuse `postprocess._detect_layers`), Z-move
+  fallback when unmarked. Bounding box, move count, layer count, crude time estimate
+  (Σ distance ÷ feed). Absolute/relative + `G92` aware (share `gcode/util.parse_words`).
+- Pure, dependency-free, streaming read (don't hold the whole path list twice).
+
+**Tests / acceptance**
+- `tests/data/sample.gcode`, `cura_sample.gcode`, `prusa_sample.gcode`: expected
+  layer counts, bounding box, first/last segment, travel-vs-extrude split.
+- Relative moves (`G91`) and `G92 E0` handled.
+- A file with no layer markers still yields segments + a Z-derived layer table.
+
+---
+
+### C15 — Shared insert geometry (`sequences/geometry.py`)  🟢
+
+**Goal.** One function computes the insert motion; the sequence executes it and the
+viewer draws it, so they can never disagree.
+
+- `plan_insert_moves(mi, config, saved: PrinterState) -> list[InsertMove]` where
+  `InsertMove = (phase: str, gcode: str, endpoint: tuple|None, kind: str)` covering
+  PARK → APPROACH → PRESS → SHEAR → LIFT → RESUME (DISPENSE/ASK are non-motion).
+- `check_envelope(mi, config, saved) -> list[str]` (names of out-of-range targets)
+  — `insert_magnet` keeps raising `OutOfEnvelopeError`; the dialog uses the list form.
+- Refactor `insert_magnet` to emit these moves. **No behaviour change** — the C2
+  assertions (targets, no `G28`, restore-on-error) stay green untouched.
+
+**Tests / acceptance**
+- `plan_insert_moves` targets == the values C2 already asserts (`pocket − offset`,
+  `seat_z − offset.z`, lateral shear).
+- `check_envelope` flags the same cases `_check_envelope` raises on.
+- `insert_magnet` test suite unchanged and green.
+
+---
+
+### C16 — Insert-motion visualisation (`viz/preview.py`, matplotlib)  🟢
+
+**Goal.** See the toolpath and watch the magnet-insert motion before touching hardware.
+
+- `viz/toolpath_fig.py` — pure figure builders: `layer_axes(toolpath, layer)` (2D
+  top-down), `path_axes3d(toolpath)` (3D), `overlay_insert(ax, moves, offset)`
+  (nozzle path + pole-tip path, phase-coloured), `mark_envelope(ax, bad)`.
+- `viz/preview.py` — `PreviewWindow(Toplevel)` with `FigureCanvasTkAgg`: layer
+  slider, 2D/3D toggle, play / pause / scrub the tip along `plan_insert_moves`,
+  envelope violations in red. Opened from the panel and from `main.py --preview FILE`.
+- `matplotlib` → `requirements.txt`; note `uv` in the commit body.
+- **Fallback (documented, not built now):** if the Tk/matplotlib animation is
+  sluggish, `viz/` also gains `export_html(toolpath, moves) -> path` reusing the
+  same builders' data and opens it in the browser.
+
+**Tests / acceptance**
+- Figure builders unit-tested on data only (segment counts, colour per phase,
+  bad-target list) — no display needed.
+- `preview.py` widget: smoke test only (construct with a dummy root), like `panel.py`.
+- Manual: `python main.py --sim --preview tests/data/sample.gcode` shows the puck
+  path + the insert animation.
+
+---
+
+### C17 — "Plan magnet insert" dialog + save (`ui/`)  🟢
+
+**Goal.** Place the sentinel and save the file from the GUI — no CLI.
+
+- `ui/plan_dialog.py` — `PlanInsertDialog`: pocket X / Y, seat Z, shear dir
+  (`+X -X +Y -Y`), target (layer N **or** Z mm). Live envelope check against the
+  current config + loaded toolpath's top Z. "Preview" → C16 window. "Save…" →
+  `postprocess.inject_sentinel` → `<stem>.magnet.gcode` → `controller.load_gcode()`
+  on it, log the path.
+- Optional checkbox "also emit `M0` before the sentinel" (off by default) for
+  standalone-print pause behaviour.
+- Panel: a "Plan magnet insert…" button, enabled once a file is loaded and idle.
+
+**Tests / acceptance**
+- Dialog compute/validate logic (headless): valid input → correct `inject_sentinel`
+  call + output path; out-of-envelope → blocked with a message, no file written.
+- Saved file round-trips through `parse_sentinel`; still parses as G-code.
+- `M0` checkbox → the `M0` line precedes the sentinel in the output.
+
+---
+
+### C18 — Panel finish: idle polling, extrude/retract, progress (was C10–C12)  🟢
+
+- `Controller.refresh_state()` — `M105` then `_emit_state()`; panel-timer driven
+  (no new thread) every `ui.idle_poll_s` when connected + idle; `0` disables.
+  Config key `ui: { idle_poll_s: 2.0 }`, validated as a number ≥ 0.
+- `Controller.extrude(mm, feed)` — `M83` then `G1 E<mm> F<feed>`; retract = negative
+  `mm`; ignored + logged while running.
+- `Controller.progress` property `(sent, total)` + `("progress", …)` events; panel
+  `ttk.Progressbar` + `line N / total (pct)`; switches to `done N/N` on the `done` event.
+
+**Tests / acceptance**
+- `refresh_state()` sends `M105` + emits one `state`; no-op when disconnected/running.
+- `extrude(5, 300)` → `M83`,`G1 E5 F300`; `extrude(-2, 300)` → retract; blocked while running.
+- `progress` is `(0,0)` before, `(sent,total)` during, final counts after.
+
+---
+
+### C19 — End-to-end integration + docs + sanity pass  🟢
+
+- `tests/test_workflow_sim.py` — one test: load `sample.gcode` → `parse_toolpath` →
+  `plan_insert_moves` → `inject_sentinel` → stream the saved file through `SimPrinter`
+  → sentinel fires `insert_magnet` → `confirm→success` → EOF; assert final position,
+  temp, and that the saved file carried the sentinel.
+- Docs: `.CLAUDE/CLAUDE.md` (entry points, module table, Running, Architecture data
+  flow), `project/PROJECT_PLAN.md`, `TODO.md`, `README.md`. **Delete
+  `project/PROTO_PLAN.md`.**
+- `pytest` green; `python -m py_compile magnet_embed/*.py magnet_embed/**/*.py main.py`
+  clean. Sanity checklist (Dev-Rule scan: no `G28`/`M0` in sequence paths, config
+  fully read, sim↔serial API parity, exceptions raised somewhere) recorded in
+  `.CLAUDE/CLAUDE-LOG.md`.
 
 ---
 
