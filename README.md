@@ -42,7 +42,8 @@ python magnet_embed\main.py         :: hardware — after the pre-hardware check
 |------|------|
 | `.CLAUDE/CLAUDE.md` | Full project brief — architecture, modules, conventions, rules |
 | `project/PROJECT_PLAN.md` | Multi-phase plan — goals, steps, files, success criteria, risks, checklist |
-| `TODO.md` | Task tracker (mirrors the plan checklist) |
+| `project/BUILD_PLAN.md` | Software build broken into commit-sized chunks (C1–C6) + protocol notes + references |
+| `TODO.md` | Task tracker (mirrors the plan checklists) |
 | `.CLAUDE/CLAUDE-LOG.md` | Session-by-session history |
 
 ## Status

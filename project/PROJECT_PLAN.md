@@ -174,6 +174,10 @@ over, and survives the reheat, before writing software.
 
 ### Phase 1 — Python host + Tkinter, operator-triggered steps
 
+> Implementation is chunked in **`project/BUILD_PLAN.md`** (C1–C6), one commit per
+> chunk, with Marlin serial-protocol notes and research references. The task table
+> below is the feature view; BUILD_PLAN is the build order.
+
 **Goal.** A control panel that runs a real sliced file end-to-end, stops at the
 sentinel, walks the full insert state machine with **operator prompts standing in
 for the Uno**, and resumes — proven in simulation, then on the printer.

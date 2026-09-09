@@ -64,5 +64,24 @@
 - Updated `.CLAUDE/CLAUDE.md` (overview, module table, data flow, insert-sequence
   subsection, Key Modules, Key Conventions, Platform Constraints, Deployment Notes,
   Dev Rules, Phase 2 TODO, overrides), `TODO.md`, and `README.md` to match.
-- Still no code — `magnet_embed/` does not exist yet.
+- Still no code — `magnet_embed/` does not exist yet. (cf194a9)
+
+## 2026-09-09 — Software build plan + research
+
+- Researched host-controlled G-code streaming: Printrun `printcore.py` (`clear`-flag
+  ack loop, resend, pause/resume), OctoPrint `comm.py` / serial schema / virtual
+  printer (firmware-quirk handling, sim model), Marlin g-code docs (M400 gates real
+  motion completion — `ok` only means "buffered"; M115/M114/M155/M109), minimal
+  senders (PyGcodeSender, gcode-cli), Ender 3 V3 SE OctoPrint friction (M110, host
+  action commands — plain-line streaming avoids it), Arduino auto-reset
+  (`dtr=False` before open), and component-embedding-via-pause prior art.
+- Wrote `project/BUILD_PLAN.md`: protocol notes (receive-line handling table,
+  connect settle, M-code cheatsheet), chunks C1–C6 (files + tests + acceptance,
+  one commit each), and a References section with all the links.
+- Cross-linked BUILD_PLAN from `CLAUDE.md`, `PROJECT_PLAN.md`, `TODO.md`, `README.md`;
+  `TODO.md` Phase 1 now tracks C1–C6.
+- Decisions baked into the plan: plain-line streaming (no `M110`/checksums unless the
+  printer requests resends); `M400` gates every insert-sequence phase; `SimPrinter`
+  models the OctoPrint virtual-printer idea; hardware smoke test stays a manual step.
+- Next: execute C1.
 

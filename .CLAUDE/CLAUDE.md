@@ -268,7 +268,7 @@ hardware attached.
 
 | File | Tracked? | Notes |
 |------|----------|-------|
-| `.CLAUDE/*.md`, `project/PROJECT_PLAN.md`, `README.md`, `TODO.md` | yes | Project docs. `CLAUDE-COMMON.md` is shared — never edit here. |
+| `.CLAUDE/*.md`, `project/PROJECT_PLAN.md`, `project/BUILD_PLAN.md`, `README.md`, `TODO.md` | yes | Project docs. `CLAUDE-COMMON.md` is shared — never edit here. |
 | `.gitignore` | yes | Excludes `.idea/`, `venv/`, `__pycache__/`, generated G-code, `logs/`, `config.local.yaml`. |
 | `magnet_embed/config.yaml` | yes | Committed with safe defaults; local COM ports / offsets may be overridden — see below. |
 | `dispenser_fw/` | yes | Phase 2 — Arduino Uno sketch for the magazine servo. |
@@ -395,8 +395,10 @@ Referenced by number in TODO items and commit messages.
 ## Project TODO List
 
 > **Authoritative plan: `project/PROJECT_PLAN.md`** — per-phase goals, steps, files
-> affected, success criteria, risks, and the consolidated checklist. `TODO.md` mirrors
-> the checklist. The list below is the quick view; keep all three in sync in one commit.
+> affected, success criteria, risks, and the consolidated checklist. **Software build
+> is chunked in `project/BUILD_PLAN.md`** (C1–C6, one commit each, with protocol notes
+> and research references). `TODO.md` mirrors the checklists. The list below is the
+> quick view; keep them in sync in one commit.
 
 Legend: 🔴 Bug / rule violation  |  🟡 Incomplete feature  |  🟢 Not started  |  ✅ Done
 

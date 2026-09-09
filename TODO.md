@@ -28,17 +28,14 @@ criteria, risks). Architecture and rules: `.CLAUDE/CLAUDE.md`. Keep all three in
 - [ ] Record magnet grade / dimensions / pocket clearance / bed-attraction in PROJECT_PLAN §8
 
 ### Phase 1 — Python host + Tkinter (operator-triggered steps)
-- [ ] 1.1 Repo scaffold (`magnet_embed/`, venv, `requirements.txt`, `config.yaml`)
-- [ ] 1.2 `PrinterState` + `MagnetInsert` + `PrinterLink` abstract
-- [ ] 1.3 `printer_sim`
-- [ ] 1.4 `GcodeRunner` (stream + ok + pause/resume/cancel + sentinel detect & parse)
-- [ ] 1.5 `gcode/postprocess.py` — `;MAGNET_INSERT X Y Z S<dir>` injection + CLI
-- [ ] 1.6 `sequences/insert_magnet.py` — SAVE…RESUME state machine, operator prompts for the Uno
-- [ ] 1.7 `ui/panel.py` + `main_sim.py` (incl. Success / Retry / Abort modal)
-- [ ] 1.8 `printer_serial` + `main.py` + hardware smoke test (air-print)
-- [ ] Tests: runner, postprocess, insert state machine, printer sim
+Chunked in `project/BUILD_PLAN.md` — one commit per chunk.
+- [ ] C1 Skeleton: config, `SimPrinter`, sentinel parser, `GcodeRunner`, headless `main_sim` + tests
+- [ ] C2 `sequences/insert_magnet.py` — SAVE…RESUME state machine against the sim + tests
+- [ ] C3 `gcode/postprocess.py` — `;MAGNET_INSERT X Y Z S<dir>` injection + CLI + tests
+- [ ] C4 Tkinter panel + threading mediator (Success / Retry / Abort modal)
+- [ ] C5 Real serial: `printer_serial` + `dispenser_serial` + Marlin rx parser + tests
+- [ ] C6 Integration sim test, run logging, full sanity pass
 - [ ] Pre-hardware gate passed
-- [ ] Full sim print completes with one operator-driven insert
 - [ ] Full hardware print completes with one operator-driven insert
 
 ### Phase 2 — magnet applicator (Arduino Uno + printer moves)
