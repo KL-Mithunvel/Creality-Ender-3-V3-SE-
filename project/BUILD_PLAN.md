@@ -9,7 +9,7 @@ chunks. Each chunk: build → `pytest` green → stage → commit.
 |--|--|
 | Owner | kl mithunvel |
 | Created | 2026-09-09 |
-| Status | C1–C3 done (56 tests). C4 next. |
+| Status | C1–C4 done (64 tests). C5 next. |
 | Overall plan | `project/PROJECT_PLAN.md` |
 | Architecture / rules | `.CLAUDE/CLAUDE.md` |
 
@@ -181,11 +181,21 @@ height-above-top. `fmt_number` moved to `gcode/util.py` (shared with
 
 ---
 
-### C4 — Tkinter control panel + threading
+### C4 — Tkinter control panel + threading  ✅
 
 **Goal.** `ui/panel.py` + an `app.py` mediator: streaming on a worker thread, UI on
 the main thread, `queue.Queue` + `root.after()` for updates. Success/Retry/Abort modal.
 Jog/home enabled only when not printing.
+
+**Done:** `app.Controller` — headless mediator (worker thread runs `GcodeRunner`;
+worker→UI via an events queue; UI→worker prompt answers via an answers queue on
+which `_prompt` blocks). `ui/panel.py` — `ControlPanel` (connect / load / run /
+pause / resume / cancel / jog+home idle-only / temps / read-only log) + a modal
+`Success/Retry/Abort` (and `Ready/Abort`) dialog; `run_gui()`. `SimPrinter` gained
+`command_delay` so runs take real time for the GUI + threading tests. `main_sim`
+gained `--gui`. `test_app.py` — 8 tests (full run, abort, pause/resume, cancel,
+jog gating, load gating). 64 tests total. UI defaults as announced (jog 0.1/1/10,
+modal prompt, no raw G-code box).
 
 **Files:** `magnet_embed/ui/panel.py`, `magnet_embed/app.py`, update `main_sim.py` to
 launch the GUI, `tests/test_app.py` (mediator logic only, not widgets).

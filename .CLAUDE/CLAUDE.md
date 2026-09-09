@@ -58,10 +58,10 @@ involvement is acceptable at this stage.
 
 ## Running the System
 
-> Build status: **C1–C3 done** (`project/BUILD_PLAN.md`) — the sim pipeline below runs
-> the full insert sequence against `SimPrinter` + `SimDispenser`, and `postprocess`
-> injects the sentinel. The Tkinter UI (C4) and the real serial links (C5) are not
-> built yet. venv first, always.
+> Build status: **C1–C4 done** (`project/BUILD_PLAN.md`) — sim pipeline runs the full
+> insert sequence, `postprocess` injects the sentinel, and there's a Tkinter panel
+> (`python -m magnet_embed.main_sim --gui`). The real serial links (C5) and
+> integration/sanity pass (C6) are not done yet. venv first, always.
 
 ```bat
 :: one-time setup (Windows)
@@ -70,7 +70,8 @@ venv\Scripts\activate
 pip install -r requirements.txt        :: uv migration planned — prefer uv when it lands
 
 :: simulation — no hardware, safe on any machine
-python magnet_embed\main_sim.py
+python -m magnet_embed.main_sim tests\data\sample.gcode        :: headless
+python -m magnet_embed.main_sim --gui tests\data\sample.gcode  :: Tkinter panel
 
 :: tests + lint (run before every commit)
 python -m pytest
@@ -112,7 +113,8 @@ the same `magnet_embed/config.yaml`.
 | `magnet_embed/gcode/runner.py` | `GcodeRunner` — streams lines, waits for `ok`, detects + parses the sentinel, handles pause / resume / cancel. |
 | `magnet_embed/gcode/postprocess.py` | Inserts the `;MAGNET_INSERT X Y Z S<dir>` sentinel comment at a chosen layer / height. |
 | `magnet_embed/sequences/insert_magnet.py` | The `SAVE → PARK → DISPENSE → APPROACH → PRESS → SHEAR → LIFT → ASK → RESUME` state machine. |
-| `magnet_embed/ui/panel.py` | Tkinter panel — connect, jog/home (pre-print only), load G-code, run, pause/resume/cancel, "Insert Magnet", the Success/Retry/Abort prompt, live log. |
+| `magnet_embed/app.py` | `Controller` — headless UI↔worker mediator (threads, queues, prompt blocking). |
+| `magnet_embed/ui/panel.py` | Tkinter panel — thin view over `Controller`; jog/home idle-only, modal Success/Retry/Abort prompt, live log. |
 | `dispenser_fw/` | Arduino Uno sketch for the magazine servo (Phase 2). |
 | `tests/` | `pytest` — runner, postprocess, insert state machine, printer sim, dispenser sim. |
 
@@ -176,12 +178,13 @@ hardware attached.
 
 ## Key Modules
 
-> Built (C1–C3): `config`, `state`, `exceptions`, `links/base` + `printer_sim` +
+> Built (C1–C4): `config`, `state`, `exceptions`, `links/base` + `printer_sim` +
 > `dispenser_sim`, `gcode/util` + `gcode/sentinel` + `gcode/runner` +
-> `gcode/postprocess`, `sequences/insert_magnet` (full state machine), `main_sim`.
-> Not built: `ui/panel` (C4), `printer_serial` / `dispenser_serial` / `main` (C5).
-> Actual layout: text/number helpers (`strip_comment`, `parse_words`, `fmt_number`)
-> are in `gcode/util.py`; both ABCs are in `links/base.py`.
+> `gcode/postprocess`, `sequences/insert_magnet`, `app.Controller` (threaded
+> mediator), `ui/panel` (Tkinter), `main_sim` (`--gui`).
+> Not built: `printer_serial` / `dispenser_serial` / `main` (C5), integration (C6).
+> Actual layout: text/number helpers are in `gcode/util.py`; both ABCs in
+> `links/base.py`; the UI↔worker mediator is `app.Controller`, not inside `ui/`.
 
 ### `links/printer_link.py` — `PrinterLink` (abstract)
 - `connect() -> None` — open the port, wait for the firmware banner. Raises `PrinterConnectionError`.
@@ -226,11 +229,21 @@ hardware attached.
 - **No `G28` anywhere** — every move is commanded and tracked (Development Rule 11).
 - On any failure: nozzle target restored (or set to 0 on operator abort), re-raised. Never swallowed.
 
-### `ui/panel.py`
-- `ControlPanel(root, printer, dispenser, config)` — connect, jog (±X/Y/Z step) and
-  home **only while not printing**, set temps, load G-code, run, pause/resume/cancel,
-  "Insert Magnet" (manual trigger), the modal **Success / Retry / Abort** prompt, and a
-  scrolling serial log.
+### `app.py` — `Controller`
+- Headless mediator (no Tkinter). Owns `printer`, `dispenser`, `config`, the
+  `GcodeRunner`, and two queues. `start_run()` spawns a daemon worker;
+  worker→UI events via `poll_events()`; the insert sequence's `prompt()` blocks the
+  worker on an answers queue until `answer_prompt(value)`.
+- Actions: `connect`, `load_gcode`, `jog`, `home`, `set_temp` (all no-ops while a run
+  is active), `start_run`, `pause`, `resume`, `cancel`, `answer_prompt`.
+- Event kinds: `log`, `state` (a `PrinterState`), `prompt` (`"dispense"`/`"confirm"`),
+  `done`, `error`.
+
+### `ui/panel.py` — `ControlPanel` + `run_gui(controller)`
+- Thin Tkinter view over a `Controller`. Connect, load G-code, run/pause/resume/cancel,
+  jog (0.1/1/10 mm) + home **idle only**, set temps, read-only log, live position/temp
+  line. `_show_prompt` opens a modal **Success / Retry / Abort** (or **Ready / Abort**)
+  dialog that calls `controller.answer_prompt`. Drains `poll_events()` every 120 ms.
 
 ---
 

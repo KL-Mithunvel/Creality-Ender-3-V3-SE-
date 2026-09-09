@@ -8,6 +8,7 @@ busy) is added in build chunk C5 for testing the real serial link.
 
 from __future__ import annotations
 
+import time
 from collections import deque
 
 from ..exceptions import AckTimeout, PrinterConnectionError
@@ -19,11 +20,21 @@ _Move = tuple[float, float, float, float]  # x, y, z, e after the move
 
 
 class SimPrinter(PrinterLink):
-    """Simulated printer. `sent` and `moves` are exposed for test assertions."""
+    """Simulated printer. `sent` and `moves` are exposed for test assertions.
 
-    def __init__(self, *, home: tuple[float, float, float] = (0.0, 0.0, 0.0)) -> None:
+    `command_delay` sleeps that many seconds per line — set it non-zero to make a
+    streamed run take real time (useful for the GUI and for threading tests).
+    """
+
+    def __init__(
+        self,
+        *,
+        home: tuple[float, float, float] = (0.0, 0.0, 0.0),
+        command_delay: float = 0.0,
+    ) -> None:
         self.state = PrinterState()
         self._home = home
+        self._delay = command_delay
         self._acks: deque[str] = deque()
         self.sent: list[str] = []      # every line received, verbatim
         self.moves: list[_Move] = []   # (x, y, z, e) after each move/home
@@ -39,6 +50,8 @@ class SimPrinter(PrinterLink):
     def send_line(self, line: str) -> None:
         if not self.state.connected:
             raise PrinterConnectionError("SimPrinter.send_line() before connect()")
+        if self._delay:
+            time.sleep(self._delay)
         self.sent.append(line)
         self._execute(strip_comment(line).strip())
         self._acks.append(self._ok_payload())

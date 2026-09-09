@@ -157,5 +157,24 @@
   (12 tests incl. CLI + round-trip through `parse_sentinel`). 56 tests total.
 - UI defaults decided for C4 (told the user, open to veto): jog steps 0.1/1/10 mm;
   Success/Retry/Abort as a modal dialog; read-only log pane, no raw G-code entry.
-- Next: C4 — Tkinter panel + threading mediator.
+
+## 2026-09-09 — C4: control panel + threading mediator
+
+- `app.Controller` — headless mediator, no Tkinter. Worker thread runs
+  `GcodeRunner.run()`; worker→UI via an events `Queue` drained by `poll_events()`;
+  the insert sequence's `prompt(stage)` posts a `("prompt", stage)` event then
+  blocks on an answers `Queue` until the UI calls `answer_prompt(value)`. Actions
+  (`connect`/`load_gcode`/`jog`/`home`/`set_temp`/`start_run`/`pause`/`resume`/
+  `cancel`) — the printer-touching ones are no-ops while a run thread is alive.
+- `ui/panel.py` — `ControlPanel` (thin Tkinter view) + `run_gui()`: connect / load /
+  run controls / jog+home (idle only) / temps / read-only `ScrolledText` log / live
+  state line; modal `Success/Retry/Abort` (and `Ready/Abort`) dialog that can't be
+  closed without choosing.
+- `SimPrinter(command_delay=…)` added so a streamed run takes real wall-clock time
+  (needed for the GUI feel and for deterministic pause/jog tests).
+- `main_sim` gained `--gui` (`gcode` arg now optional with `--gui`).
+- `test_app.py` — 8 mediator tests (full run w/ prompt, abort, jog-idle,
+  jog-rejected-running, pause/resume, cancel, no-file, load-rejected). 64 total.
+- GUI smoke-tested: `ControlPanel` constructs + `root.update()` runs clean.
+- Next: C5 — real serial links (`printer_serial`, `dispenser_serial`, Marlin rx parser).
 
