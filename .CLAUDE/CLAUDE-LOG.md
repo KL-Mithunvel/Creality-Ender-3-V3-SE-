@@ -1,2 +1,42 @@
 # Claude Log
 
+## 2026-09-09 — Project scoping: printer-control options + doc scaffolding
+
+- Reviewed the repo — it was the untouched shared `CLAUDE.md` template library
+  (`CLAUDE.md`, `CLAUDE-COMMON.md`, `PROJ_STARTER.md`), no project content.
+- Analysed ways to control a Creality Ender-3 V3 SE for a magnet-embedding
+  prototype (print a part, pause, embed a magnet in a printed pocket, resume):
+  slicer pause-at-layer, Pronterface/Printrun, Python host script over serial,
+  OctoPrint on a Pi, Klipper + Moonraker. Compared on manual-vs-automated,
+  extra hardware, scriptability, risk to the printer, effort.
+- Key V3 SE facts confirmed for the brief: Marlin-based, USB-C serial at 115200,
+  microSD, **no networking**, standard pause primitives (`M0`/`M25`/`M600`).
+- Owner decisions:
+  - Control: **Python host script** (`pyserial` / `printrun.printcore`) + **Tkinter** panel.
+  - Magnet placement: **actuated placer on a separate ESP32/Pico MCU** (Phase 2);
+    operator-triggered in Phase 1.
+  - Topology: **PC tethered to the printer over USB-C**; no Raspberry Pi.
+- Rewrote `.CLAUDE/CLAUDE.md` as a real project brief: Project Overview, Running
+  the System, Architecture (module table, data-flow diagram, threading model),
+  Key Modules (intended interfaces), Key Conventions (the `;MAGNET_INSERT`
+  sentinel, layer targeting, placer serial protocol), Data Files, Platform
+  Constraints, Deployment Notes (Windows dev == runtime; hardware last),
+  Known Technical Debt (none), 10 numbered Development Rules, phased TODO list,
+  User Rules. Deleted the Schema Reference section (no data layer).
+- Populated root `TODO.md` with the phased plan; wrote `README.md`.
+- `CLAUDE-COMMON.md` left untouched (shared file).
+- No code written yet — `magnet_embed/` package does not exist.
+
+## 2026-09-09 — Project plan document + first commit
+
+- Wrote `project/PROJECT_PLAN.md` — the authoritative multi-phase plan: objective
+  and scope, locked decisions, architecture summary, Phase 0–3 with per-task files
+  affected and success criteria, a consolidated checkbox to-do list, a risks table,
+  and an open-questions section for Phase 0 findings.
+- Added `.gitignore` (`.idea/`, `venv/`, `__pycache__/`, generated `*.gcode`,
+  `logs/`, `config.local.yaml`).
+- Cross-linked the plan from `.CLAUDE/CLAUDE.md` (TODO section + Data Files),
+  `TODO.md`, and `README.md`; `TODO.md` now mirrors the plan checklist.
+- Committed everything to `main` (was still just the template + the earlier
+  uncommitted doc rewrite). `.idea/` excluded via `.gitignore`.
+

@@ -1,0 +1,22 @@
+# IDE
+.idea/
+.vscode/
+
+# Python
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Local config overrides (real COM ports, machine-specific)
+config.local.yaml
+magnet_embed/config.local.yaml
+
+# Sliced / post-processed G-code — generated, not source
+*.gcode
+*.magnet.gcode
+
+# Runtime output
+logs/
