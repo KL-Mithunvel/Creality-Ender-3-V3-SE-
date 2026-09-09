@@ -371,3 +371,14 @@
 - `matplotlib>=3.8,<4` in requirements.txt. **uv migration still pending.**
 - `tests/test_viz.py` (6). Looked at a headless-rendered preview once — path,
   phase colours, tip markers and the X-Z press depth read correctly.
+
+### C17 — "Plan magnet insert" dialog + save ✅ (159 tests)
+
+- `ui/plan_dialog.py`: `PlanInsertDialog` + pure helpers (`resolve_target_z`,
+  `magnet_output_path`, `save_magnet_gcode`, `envelope_report`). Enter pocket X/Y
+  (prefilled from the bbox centre), seat Z, shear, target layer/Z; live envelope
+  check; Preview -> C16; Save -> `<stem>.magnet.gcode`, auto-loaded.
+- `postprocess.inject_sentinel` gained `emit_pause` (+ CLI `--pause`) -> a real M0
+  before the sentinel for microSD prints.
+- Panel: "Plan magnet insert…" button (idle + file loaded).
+- `tests/test_plan_dialog.py` (6) + 1 postprocess test.

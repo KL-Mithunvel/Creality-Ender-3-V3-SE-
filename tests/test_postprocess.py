@@ -105,3 +105,11 @@ def test_cli(tmp_path, capsys):
     rc = main([str(CURA), "--layer", "99", "--xy", "1", "2", "--seat-z", "3", "--shear", "+X",
                "-o", str(tmp_path / "x.gcode")])
     assert rc == 1
+
+
+def test_emit_pause_prepends_m0_before_the_sentinel(tmp_path):
+    lines, line_no = _run(CURA, tmp_path, layer=2, emit_pause=True)
+    idx = lines.index(";MAGNET_INSERT X60 Y55 Z6 S+X")
+    assert lines[idx - 1].strip().startswith("M0")
+    assert lines[idx - 2] == ";LAYER:2"
+    assert line_no == idx + 1                       # 1-based line of the sentinel

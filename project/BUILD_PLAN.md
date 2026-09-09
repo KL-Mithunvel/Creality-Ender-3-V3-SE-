@@ -592,7 +592,16 @@ not needed — the Tk/matplotlib animation is responsive enough.
 
 ---
 
-### C17 — "Plan magnet insert" dialog + save (`ui/`)  🟢
+### C17 — "Plan magnet insert" dialog + save (`ui/`)  ✅
+
+**Done:** `ui/plan_dialog.py` — `PlanInsertDialog` + pure helpers `resolve_target_z`
+(layer index → its Z, or Z as-is), `magnet_output_path`, `save_magnet_gcode`,
+`envelope_report`. Pocket X/Y (prefilled from the toolpath bbox centre), seat Z,
+shear, target (layer **or** Z); live envelope check; **Preview** → C16 window;
+**Save** → `postprocess.inject_sentinel(z_mm=…)` → `<stem>.magnet.gcode` →
+`controller.load_gcode`. `inject_sentinel` gained `emit_pause` (+ CLI `--pause`) to
+prepend a real `M0`. Panel: "Plan magnet insert…" button, idle + file-loaded only.
+`tests/test_plan_dialog.py` (6) + 1 in `test_postprocess.py`. 159 tests.
 
 **Goal.** Place the sentinel and save the file from the GUI — no CLI.
 

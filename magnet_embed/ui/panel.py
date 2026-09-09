@@ -41,6 +41,8 @@ class ControlPanel(ttk.Frame):
         files = ttk.Frame(self)
         files.grid(row=row, column=0, sticky="ew", pady=2)
         ttk.Button(files, text="Load G-code…", command=self._load).pack(side="left")
+        self.btn_plan = ttk.Button(files, text="Plan magnet insert…", command=self._plan_insert)
+        self.btn_plan.pack(side="left", padx=6)
         self.file_lbl = ttk.Label(files, text="(no file)")
         self.file_lbl.pack(side="left", padx=8)
         row += 1
@@ -107,6 +109,12 @@ class ControlPanel(ttk.Frame):
 
     # --- actions -------------------------------------------------
 
+    def _plan_insert(self) -> None:
+        if self.c.gcode_path is None or self.c.running:
+            return
+        from .plan_dialog import PlanInsertDialog
+        PlanInsertDialog(self.winfo_toplevel(), self.c)
+
     def _send_cmd(self) -> None:
         line = self.cmd_entry.get()
         if line.strip():
@@ -163,6 +171,9 @@ class ControlPanel(ttk.Frame):
         idle_state = "disabled" if running else "normal"
         self.btn_send.configure(state=idle_state)
         self.cmd_entry.configure(state=idle_state)
+        self.btn_plan.configure(
+            state=("disabled" if running or self.c.gcode_path is None else "normal")
+        )
 
     def _show_prompt(self, stage: str) -> None:
         if self._prompt_open:

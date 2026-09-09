@@ -85,11 +85,14 @@ def inject_sentinel(
     shear: str,
     layer: int | None = None,
     z_mm: float | None = None,
+    emit_pause: bool = False,
 ) -> int:
     """Write `in_path` to `out_path` with one sentinel added. Return its 1-based line no.
 
     Pass exactly one of `layer` (match a ``;LAYER:`` index / a ``;LAYER_CHANGE``
-    ordinal) or `z_mm` (first layer whose height >= this).
+    ordinal) or `z_mm` (first layer whose height >= this). With `emit_pause`, a real
+    ``M0`` is written just before the sentinel so the file also pauses when printed
+    straight from microSD.
     """
     if (layer is None) == (z_mm is None):
         raise ValueError("pass exactly one of layer= or z_mm=")
@@ -122,10 +125,12 @@ def inject_sentinel(
         f";MAGNET_INSERT X{fmt_number(px)} Y{fmt_number(py)} "
         f"Z{fmt_number(seat_z)} S{shear}"
     )
+    new_lines = ["M0 ; magnet insert — resume when the magnet is seated"] if emit_pause else []
+    new_lines.append(sentinel)
     insert_at = target.marker_end + 1
-    out_lines = lines[:insert_at] + [sentinel] + lines[insert_at:]
+    out_lines = lines[:insert_at] + new_lines + lines[insert_at:]
     Path(out_path).write_text("\n".join(out_lines) + "\n", encoding="utf-8")
-    return insert_at + 1
+    return insert_at + len(new_lines)   # 1-based line number of the sentinel
 
 
 def _default_out(in_path: str) -> str:
@@ -148,6 +153,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="magnet seat height = pocket floor + magnet thickness (mm)")
     parser.add_argument("--shear", choices=SHEAR_DIRS, required=True,
                         help="direction to slide the tool off the seated magnet")
+    parser.add_argument("--pause", action="store_true",
+                        help="also write a real M0 before the sentinel (pause on microSD prints)")
     parser.add_argument("-o", "--out", default=None, help="output file (default: *.magnet.gcode)")
     args = parser.parse_args(argv)
 
@@ -157,7 +164,7 @@ def main(argv: list[str] | None = None) -> int:
             args.gcode, out,
             pocket_xy=(args.xy[0], args.xy[1]),
             seat_z=args.seat_z, shear=args.shear,
-            layer=args.layer, z_mm=args.z_mm,
+            layer=args.layer, z_mm=args.z_mm, emit_pause=args.pause,
         )
     except (PostprocessError, ValueError, OSError) as exc:
         print(f"error: {exc}", file=sys.stderr)

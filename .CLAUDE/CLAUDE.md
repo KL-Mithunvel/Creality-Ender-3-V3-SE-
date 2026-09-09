@@ -138,7 +138,8 @@ back-compat wrappers that call `entry` with a fixed mode.
 | `magnet_embed/sequences/insert_magnet.py` | The `SAVE → PARK → DISPENSE → APPROACH → PRESS → SHEAR → LIFT → ASK → RESUME` state machine. Targets come from `geometry.compute_targets`. |
 | `magnet_embed/app.py` | `Controller` — headless UI↔worker mediator (threads, queues, prompt blocking); optional `log_dir` writes a per-run transcript. |
 | `magnet_embed/runlog.py` | `RunLog` — one `logs/<ts>-<name>.log` per streamed job, a timestamped line per event. |
-| `magnet_embed/ui/panel.py` | Tkinter panel — thin view over `Controller`; jog/home + raw G-code entry idle-only, modal Success/Retry/Abort prompt, live log. |
+| `magnet_embed/ui/panel.py` | Tkinter panel — thin view over `Controller`; jog/home + raw G-code entry idle-only, "Plan magnet insert…" dialog, modal Success/Retry/Abort prompt, live log. |
+| `magnet_embed/ui/plan_dialog.py` | "Plan magnet insert" dialog + pure helpers — set pocket X/Y, seat Z, shear, target layer/Z; envelope-check; Preview; **Save `<stem>.magnet.gcode`** and load it. |
 | `dispenser_fw/` | Arduino Uno sketch for the magazine servo (Phase 2). |
 | `tests/` | `pytest` — runner, postprocess, insert state machine, printer sim, dispenser sim. |
 
@@ -234,11 +235,19 @@ hardware attached.
 
 ### `gcode/postprocess.py`
 - `inject_sentinel(in_path, out_path, *, layer: int | None, z_mm: float | None,
-  pocket_xy: tuple[float, float], seat_z: float, shear: str) -> int`
+  pocket_xy: tuple[float, float], seat_z: float, shear: str, emit_pause: bool = False) -> int`
   — inserts `;MAGNET_INSERT X<px> Y<py> Z<seat_z> S<shear>` at the chosen layer and
-  returns the source line number. Coordinates are in bed space.
+  returns the sentinel's line number. `emit_pause` also writes a real `M0` just
+  before it (so microSD prints pause too). Coordinates are in bed space.
 - Understands Cura / Creality Print (`;LAYER:<n>`) and PrusaSlicer (`;LAYER_CHANGE` + `;Z:<h>`) markers.
-- CLI: `python -m magnet_embed.gcode.postprocess <file> (--layer N | --z H) --xy PX PY --seat-z SZ --shear +X|-X|+Y|-Y [-o OUT]`.
+- CLI: `python -m magnet_embed.gcode.postprocess <file> (--layer N | --z H) --xy PX PY --seat-z SZ --shear +X|-X|+Y|-Y [--pause] [-o OUT]`.
+- Or use the panel's **Plan magnet insert…** dialog (`ui/plan_dialog.py`).
+
+### `ui/plan_dialog.py`
+- `PlanInsertDialog` + pure helpers `resolve_target_z`, `magnet_output_path`,
+  `save_magnet_gcode`, `envelope_report`. Enter pocket X/Y, seat Z, shear, and a
+  target (layer index or Z height); live envelope check; **Preview** opens the C16
+  window; **Save** writes `<stem>.magnet.gcode` and loads it as the active file.
 
 ### `sequences/geometry.py`
 - `compute_targets(mi, config, saved) -> Targets` (`approach_xy`, `press_z`,
