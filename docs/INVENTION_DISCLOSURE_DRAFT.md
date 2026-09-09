@@ -103,34 +103,66 @@ controlled magnet placement.
 
 ## 5. Prior Art (known products / processes / patents / publications)
 
-*Non-exhaustive; a formal search must be run by the K&K agent (see Q19).*
+*Non-exhaustive; a formal patent search must be run by the K&K agent (see Q19).
+Full notes + links in `project/RESEARCH.md`.*
 
-- Slicer "Pause at height" / filament-change scripts (Cura, PrusaSlicer, Creality
-  Print) — enable the **manual** method.
-- Marlin firmware `M600`, `M25`, `M0`, and `HOST_ACTION_COMMANDS` — pause/resume
-  primitives used by the manual method and by host software.
-- Open-hardware tool-changer projects (e.g. Jubilee; E3D tool-changer) — prior art
-  for **tool offset handling** and multiple toolheads on one motion system.
-- General 3D-printer host software (OctoPrint, Printrun/Pronterface) — prior art
-  for **host-controlled G-code streaming and pausing**.
-- Maker/vendor guides on embedding hardware in prints (Markforged blog; MLC-CAD;
-  community forum threads) — prior art for the **pocket + pause + seal** concept
-  and for **pocket sizing** (oversize the hole ~0.1–0.3 mm).
-- `[INVENTORS/AGENT TO COMPLETE]` — patent search results for: automated insertion
-  during additive manufacturing; magnetic component placement heads; sentinel/marker
-  driven print interruption.
+**Closest published work — automated in-situ placement (must be cited):**
+- **"Automated In-Situ Placing of Metal Components Into 3D Printed FFF Objects"**,
+  IEEE, May 2021 (Plätzsch et al.). Modified Prusa i3 with a **powered electromagnet
+  gripper** on a hollow-shaft NEMA 8 stepper + slip-ring (unlimited rotation); an
+  **augmented slicer** auto-generates cavities + placement G-code; parts staged on a
+  **printed bed tray**; **two cameras + OpenCV** align each part; controlled by the
+  **OctoPNP** OctoPrint plugin. https://ieeexplore.ieee.org/document/9426422/
+- **OctoPNP** — `github.com/platsch/OctoPNP` — OctoPrint plugin for camera-assisted
+  pick-and-place in 3D printers (tray + head cam + bed cam + OpenCV).
+- **"3D-Printable Electronics — Integration of SMD Placement and Wiring into the
+  Slicing Process for FDM"** (2017); **"Embedding of SMD populated circuits into FDM
+  printed objects"** (2017); **"Towards Integrating 3D Printing and Automated
+  Assembly"** (2023); **"Printegrated Circuits"** (arXiv 2025).
+
+**Host-side pause / marker mechanics:**
+- **OctoPrint `@` commands** — `@pause` etc. placed in the G-code are never sent to
+  the printer, they trigger host functions. (Our `;MAGNET_INSERT` comment is the same
+  idea, made SD-safe and carrying parameters.)
+- **OctoPrint-GCodeSystemCommands** plugin — map a G-code to a shell/Python action
+  (people drive a servo for nozzle cleaning this way).
+- **Klipper** `PAUSE`/`RESUME` macros with `SET_GCODE_VARIABLE` state save/restore;
+  **Marlin** `M125` / `PARK_HEAD_ON_PAUSE` / `M600` (firmware-side park & restore).
+- Slicer "Pause at height" / `M601` (Cura, PrusaSlicer, Creality Print) — the manual
+  pause-and-insert method.
+
+**Other:**
+- Open-hardware tool-changers (Jubilee; E3D tool-changer) — tool-offset handling,
+  multiple toolheads on one motion system.
+- DIY pick-and-place (3DPlacer, Micro_PNP, Picktor, LumenPnP, OpenPnP) — vacuum
+  pickup, feeders, rotation, bottom vision.
+- 3D-printer host software (Printrun/Pronterface, OctoPrint) — host-controlled
+  G-code streaming and pausing.
+- Maker/vendor guides on embedding hardware (Markforged; MLC-CAD; forums) — the
+  pocket + pause + seal concept, pocket oversize ~0.1–0.3 mm, 2–3 cap layers.
+
+- `[INVENTORS/AGENT TO COMPLETE]` — **patent** search (Espacenet / Google Patents /
+  Indian Patent Advanced Search / WIPO) for: automated insertion during additive
+  manufacturing; magnetic component placement heads; marker/sentinel-driven print
+  interruption; in-situ component embedding.
 
 ## 6. Has the work filled a major gap in the prior art? Describe the gap.
 
-**Yes (subject to the formal search).** The gap: **automating** the pause-and-insert
-method on a **standard, unmodified, single-tool desktop FFF printer** without a
-dedicated placement actuator. The prior art either keeps a human in the loop for
-every insert, or requires a special printer class / firmware changes / a second
-machine. The claimed approach closes that gap by (i) reusing the printer's existing
-motion system for the press and release, so the added hardware is only a
-single-servo magnet **feeder**, and (ii) driving everything from the host via a
-**G-code comment** that is inert to the printer, so no firmware or slicer changes
-are needed and the file remains normally printable.
+**Yes (subject to the formal search).** The published automated approach (IEEE 2021 /
+OctoPNP, Q5) closes the automation gap only with a **heavy, instrumented rig**: a
+dedicated powered electromagnet gripper on its own rotary stepper, two cameras with
+vision processing, a custom slicer, and a firmware/plugin that ideally manages tool
+offsets. That is a research platform, not something a hobbyist bolts onto a stock
+printer.
+
+The remaining gap this project targets: automated, repeatable, polarity-correct
+insertion on a **stock, unmodified, single-tool consumer printer** with **no added
+placement actuator and no vision**. It closes that gap by (i) using the **printer's
+own motion** for the seating press and a **lateral shear** release (pocket wall as
+the reaction feature), so the only added actuator is a single-servo **feeder**;
+(ii) an **inert G-code comment** marker so there is **no firmware or slicer change**
+and the file still prints normally from SD; and (iii) a host-side tool-offset
+transform with an envelope guard, since the firmware is untouched.
 
 ## 7. Components of the Invention
 
@@ -256,9 +288,12 @@ Candidate novel aspects (for the agent to sharpen into claims):
   spring-loaded stripper plate instead of (or with) the lateral shear.
 - **Release variants**: lateral shear (baseline); controlled rotation; passive
   fixed stripper engaged by the LIFT move; powered ejector as a fallback.
+- **Staging variants**: a magazine on the toolhead (baseline); a **printed part-tray
+  clipped to the bed** that the tool picks from per-print (as in OctoPNP); an external
+  hopper/chute feeding the pole.
 - **Marker variants**: dedicated MCU pin/output instead of a G-code comment; a
-  distinct unused G-code word; a separate side-car file keyed to layer number;
-  slicer plugin that emits the sentinel directly.
+  distinct unused G-code word; an OctoPrint `@`-command; a separate side-car file
+  keyed to layer number; a slicer plugin that emits the sentinel directly.
 - **Motion variants**: press by servo instead of Z (hybrid); tool raised/lowered by
   a second servo for printers where clearance is tight.
 - **Control variants**: fully automated confirmation via a hall-effect / vision
@@ -362,16 +397,19 @@ Indicative directions only:
 
 ## 19. Novelty / inventiveness search done?
 
-`[INVENTORS/AGENT TO COMPLETE.]` Informal web review done for background (see
-References in `project/BUILD_PLAN.md`); **no formal patent-database search yet**
-(Espacenet / Google Patents / Indian Patent Advanced Search / WIPO PATENTSCOPE).
-Recommend the K&K agent run it. Table to fill:
+Informal web/literature review is done — see **`project/RESEARCH.md`** (academic
+papers, OctoPNP, host-control docs, maker practice) and the notes in Q5. It found
+the IEEE 2021 / OctoPNP line of work as the closest published art. **No formal
+patent-database search has been done** (Espacenet / Google Patents / Indian Patent
+Advanced Search / WIPO PATENTSCOPE) — the K&K agent should run it. Table to fill:
 
 | S.no | Reference | Existing idea | Our invention |
 |------|-----------|---------------|---------------|
-| 1 | *(manual pause-and-insert guides)* | operator hand-places component during a slicer pause | automated dispense + printer-motion press + lateral shear release; polarity fixed; no operator per insert |
-| 2 | *(tool-changer projects)* | multiple toolheads on one motion system, often needs firmware support | single-servo dispenser only; placement by existing motion; no firmware change; single-tool printer |
-| 3 | `[patent search results]` | | |
+| 1 | IEEE 2021 "Automated In-Situ Placing…" / OctoPNP | automated in-situ placement via a **powered electromagnet gripper + rotary stepper + 2 cameras + custom slicer + OctoPrint plugin** on a modified Prusa | **no placement actuator** (servo only feeds); **printer motion** does press + **lateral shear** release; **no vision**; **inert comment** marker; **stock firmware**; single operator-confirm |
+| 2 | manual pause-and-insert guides (Markforged, forums) | operator hand-places a component during a slicer pause | automated dispense; polarity fixed by the holding pole; no operator per insert |
+| 3 | OctoPrint `@pause` / GCodeSystemCommands | in-stream marker triggers a host action / external script | same mechanism, but a **`;` comment** (SD-safe) carrying **placement coordinates**, driving a full park→place→shear→resume routine |
+| 4 | tool-changer projects (Jubilee, E3D) | multiple toolheads on one motion system, often needs firmware support | one **passive** feeder tool; placement by existing motion; no firmware change |
+| 5 | `[patent search results — AGENT]` | | |
 
 ## 20. Would a person of ordinary skill have arrived at this?
 
@@ -466,7 +504,8 @@ simulation but not yet with hardware. Not yet TRL 4 (lab validation).
   a Tkinter control panel, per-run logging — **94 automated tests**, validated in
   simulation only. The physical mechanism (magazine / escapement / holding pole /
   mount) and the Arduino sketch are **not yet built**; no hardware run has happened.
-- Reference material and prior-art links: `project/BUILD_PLAN.md` → References.
+- Reference material and prior-art notes: **`project/RESEARCH.md`** (comprehensive)
+  and `project/BUILD_PLAN.md` → References (protocol-focused).
 - **Before any public disclosure or repo publication, consult the K&K agent** (see
   the warning at the top).
 - Confirm **college IP-ownership policy** and the teacher's role before filing.

@@ -290,6 +290,11 @@ to `RLock`. Good argument for the integration test existing.
 
 ## References
 
+> **`project/RESEARCH.md`** is the comprehensive prior-art / similar-projects survey
+> (OctoPNP, the IEEE 2021 in-situ-placement paper, host-control patterns, pick-and-place
+> hardware, maker practice, and how each informs this build). The list below is the
+> protocol-and-implementation subset used while writing the code.
+
 **Marlin / G-code**
 - Marlin G-code index — https://marlinfw.org/meta/gcode/
 - M110 Set/Get Line Number (protocol notes on line-number sync) — https://marlinfw.org/docs/gcode/M110.html

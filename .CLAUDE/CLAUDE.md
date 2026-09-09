@@ -299,7 +299,7 @@ hardware attached.
 
 | File | Tracked? | Notes |
 |------|----------|-------|
-| `.CLAUDE/*.md`, `project/*.md`, `docs/*.md`, `README.md`, `TODO.md` | yes | Project docs. `CLAUDE-COMMON.md` is shared — never edit here. `project/HOW_IT_WORKS.md` is the plain-language guide; `docs/INVENTION_DISCLOSURE_DRAFT.md` is the patent-form draft. |
+| `.CLAUDE/*.md`, `project/*.md`, `docs/*.md`, `README.md`, `TODO.md` | yes | Project docs. `CLAUDE-COMMON.md` is shared — never edit here. `HOW_IT_WORKS.md` = plain-language guide; `RESEARCH.md` = prior-art survey; `BUILD_PLAN.md` = chunk plan; `docs/INVENTION_DISCLOSURE_DRAFT.md` = patent-form draft. |
 | `docs/*.docx` | yes | Supplied forms/templates (e.g. the K&K invention disclosure form). `~$*` lock files are git-ignored. |
 | `.gitignore` | yes | Excludes `.idea/`, `venv/`, `__pycache__/`, generated G-code, `logs/`, `config.local.yaml`. |
 | `magnet_embed/config.yaml` | yes | Committed with safe defaults; local COM ports / offsets may be overridden — see below. |

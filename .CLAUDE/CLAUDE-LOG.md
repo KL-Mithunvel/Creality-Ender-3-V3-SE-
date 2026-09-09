@@ -217,3 +217,23 @@
 - **Phase 1 software is complete.** Remaining Phase 1/2 work is hardware: build the
   applicator, write `dispenser_fw/`, measure the offset, run the manual smoke test.
 
+## 2026-09-09 — Prior-art / similar-projects research
+
+- Wrote `project/RESEARCH.md`. Key find: **OctoPNP** (`github.com/platsch/OctoPNP`)
+  and the **IEEE 2021 paper "Automated In-Situ Placing of Metal Components Into 3D
+  Printed FFF Objects"** are the closest published work — modified Prusa i3, powered
+  electromagnet gripper on a rotary stepper + slip-ring, augmented slicer generating
+  cavities + G-code, printed bed part-tray, 2 cameras + OpenCV, OctoPrint plugin.
+- Our differentiators, sharpened: no placement actuator (servo only feeds), printer
+  motion does the press + **lateral shear** release, no vision, inert `;` comment
+  marker, stock firmware, host-side offset transform.
+- Confirmed our design against: OctoPrint `@pause` (in-stream marker → host action,
+  never sent to printer — same pattern as our sentinel); OctoPrint
+  GCodeSystemCommands (gcode → servo); Klipper `PAUSE`/`RESUME` + `SET_GCODE_VARIABLE`
+  (state save/restore); Marlin `M125` (we do the host-side equivalent).
+- Pulled maker practice into Phase 0: pocket +0.1–0.3 mm, 2–3 cap layers, nothing may
+  protrude above its cavity, oil-on-walls kills adhesion, CA-glue fallback.
+- Updated `docs/INVENTION_DISCLOSURE_DRAFT.md` Q5/Q6/Q11/Q19/Q27 with the OctoPNP /
+  IEEE prior art and the bed-tray staging variant. Cross-linked RESEARCH.md from
+  README, CLAUDE.md, BUILD_PLAN, and the disclosure draft.
+
