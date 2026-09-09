@@ -141,6 +141,33 @@ def run_headless(
     return 0
 
 
+def preview(gcode: str | Path, config: dict) -> int:
+    """Open the toolpath / insert-motion preview window for `gcode`, then exit.
+
+    Overlays the insert plan if the file carries a `;MAGNET_INSERT` sentinel.
+    """
+    import tkinter as tk
+
+    from .gcode.sentinel import parse_sentinel
+    from .gcode.toolpath import parse_toolpath
+    from .viz.preview import open_preview
+
+    tp = parse_toolpath(gcode)
+    token = config["gcode"]["sentinel_token"]
+    mi = None
+    for line in Path(gcode).read_text(encoding="utf-8").splitlines():
+        mi = parse_sentinel(line, token)
+        if mi is not None:
+            break
+
+    root = tk.Tk()
+    root.withdraw()
+    win = open_preview(root, tp, mi, config)
+    win.protocol("WM_DELETE_WINDOW", root.destroy)
+    root.mainloop()
+    return 0
+
+
 def launch_panel(
     printer,
     dispenser,

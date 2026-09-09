@@ -83,6 +83,7 @@ python main.py --printer part.gcode     :: real printer over USB, no dispenser
 python main.py --hardware               :: real printer + Arduino dispenser
 python main.py --hardware --ping        :: connect to both, report, exit
 python main.py --hardware --no-dispenser :: don't build the Uno link
+python main.py --preview part.gcode     :: toolpath + insert-motion preview, then exit
 
 :: back-compat module entry points still work (thin wrappers over magnet_embed.entry)
 python -m magnet_embed.main_sim --gui tests\data\sample.gcode
@@ -131,6 +132,8 @@ back-compat wrappers that call `entry` with a fixed mode.
 | `magnet_embed/gcode/runner.py` | `GcodeRunner` — streams lines, waits for `ok`, detects + parses the sentinel, handles pause / resume / cancel. |
 | `magnet_embed/gcode/postprocess.py` | Inserts the `;MAGNET_INSERT X Y Z S<dir>` sentinel comment at a chosen layer / height. |
 | `magnet_embed/gcode/toolpath.py` | `parse_toolpath(path) -> Toolpath` — a slice as ordered `Segment`s (travel vs extrude), a layer→Z table (slicer markers, else Z-derived), bounding box, distances, rough time. Feeds the visualisation + the plan dialog. |
+| `magnet_embed/viz/toolpath_fig.py` | Pure preview helpers (`nozzle_waypoints`, `pole_waypoints`, `sample_polyline`, `state_at_z`) + matplotlib `draw_*` functions (layer X–Y, side X–Z, 3D path, phase-coloured insert overlay). No GUI backend. |
+| `magnet_embed/viz/preview.py` | `PreviewWindow` (Tk `Toplevel`, matplotlib `FigureCanvasTkAgg`) — layer slider, play/scrub the nozzle + pole tip along `plan_insert_moves`, envelope violations flagged, "Open 3D view". `python main.py --preview FILE`. |
 | `magnet_embed/sequences/geometry.py` | `compute_targets` / `plan_insert_moves` / `check_envelope` / `pole_point` — the one place the insert-motion targets are computed. `insert_magnet` executes them; the preview + plan dialog draw and envelope-check the same numbers. |
 | `magnet_embed/sequences/insert_magnet.py` | The `SAVE → PARK → DISPENSE → APPROACH → PRESS → SHEAR → LIFT → ASK → RESUME` state machine. Targets come from `geometry.compute_targets`. |
 | `magnet_embed/app.py` | `Controller` — headless UI↔worker mediator (threads, queues, prompt blocking); optional `log_dir` writes a per-run transcript. |

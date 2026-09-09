@@ -556,7 +556,19 @@ viewer draws it, so they can never disagree.
 
 ---
 
-### C16 — Insert-motion visualisation (`viz/preview.py`, matplotlib)  🟢
+### C16 — Insert-motion visualisation (`viz/preview.py`, matplotlib)  ✅
+
+**Done:** `viz/toolpath_fig.py` — pure helpers (`nozzle_waypoints`,
+`pole_waypoints`, `sample_polyline`, `state_at_z`, `phase_labels`) + matplotlib
+`draw_layer_xy` / `draw_side_xz` / `draw_path_3d` / `draw_insert_overlay` /
+`update_insert_marker`. `viz/preview.py` — `PreviewWindow` (Tk `Toplevel` +
+`FigureCanvasTkAgg`): X–Y layer panel + X–Z side panel, layer slider, play/scrub
+the nozzle + pole tip along `plan_insert_moves`, envelope violations flagged red,
+"Open 3D view". `entry.preview()` + `python main.py --preview FILE` (overlays the
+plan if the file has a sentinel). `matplotlib>=3.8,<4` added to `requirements.txt`
+(**uv migration still pending** — Dev Rule 9). `tests/test_viz.py` (6, headless —
+figure builders on a bare `Figure`, no display). 152 tests. HTML-export fallback
+not needed — the Tk/matplotlib animation is responsive enough.
 
 **Goal.** See the toolpath and watch the magnet-insert motion before touching hardware.
 

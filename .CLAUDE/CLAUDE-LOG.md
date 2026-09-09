@@ -358,3 +358,16 @@
   C2 behaviour is unchanged and its tests pass untouched. `tests/test_geometry.py` (7).
 - Also removed the accidentally-committed `project/PROTO_PLAN.md` (commit 409fb10)
   and corrected the BUILD_PLAN references.
+
+### C16 — `viz/` toolpath + insert-motion preview (matplotlib) ✅ (152 tests)
+
+- `viz/toolpath_fig.py`: pure helpers + matplotlib `draw_*` (layer X-Y, side X-Z,
+  3D path, phase-coloured insert overlay, animated tip markers). No GUI backend, so
+  the builders are unit-tested on a bare `Figure`.
+- `viz/preview.py`: `PreviewWindow` (Tk Toplevel + FigureCanvasTkAgg) — layer
+  slider, play/scrub the nozzle + pole tip along `plan_insert_moves`, envelope
+  violations flagged, "Open 3D view".
+- `entry.preview()` + `python main.py --preview FILE`.
+- `matplotlib>=3.8,<4` in requirements.txt. **uv migration still pending.**
+- `tests/test_viz.py` (6). Looked at a headless-rendered preview once — path,
+  phase colours, tip markers and the X-Z press depth read correctly.

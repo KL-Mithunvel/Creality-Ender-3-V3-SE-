@@ -38,6 +38,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.set_defaults(mode="sim")
 
     parser.add_argument("gcode", nargs="?", help="G-code file to pre-load")
+    parser.add_argument("--preview", metavar="FILE",
+                        help="open the toolpath / insert-motion preview for FILE and exit")
     parser.add_argument("--ping", action="store_true",
                         help="connect to the device(s), report, exit")
     parser.add_argument("--no-gui", action="store_true",
@@ -55,6 +57,9 @@ def main(argv: list[str] | None = None) -> int:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     config = load_config(args.config)
+
+    if args.preview:
+        return entry.preview(args.preview, config)
 
     # sim -> SimDispenser; printer -> always None; hardware -> Uno unless --no-dispenser
     printer, dispenser = entry.build_links(

@@ -11,7 +11,7 @@ criteria, risks). Architecture and rules: `.CLAUDE/CLAUDE.md`. Keep all three in
       - [x] C13 root `main.py` + `magnet_embed/entry.py` mode dispatch + `Controller.send_command` (130 tests)
       - [x] C14 `gcode/toolpath.py` — parse a slice into segments + layer table (139 tests)
       - [x] C15 `sequences/geometry.py` — `plan_insert_moves`/`check_envelope` factored out of `insert_magnet` (146 tests)
-      - [ ] C16 `viz/preview.py` — matplotlib toolpath + insert-motion animation
+      - [x] C16 `viz/preview.py` — matplotlib toolpath + insert-motion animation; `main.py --preview` (152 tests)
       - [ ] C17 `ui/plan_dialog.py` — place the sentinel + save `*.magnet.gcode`
       - [ ] C18 idle polling + extrude/retract + run-progress bar (was C10–C12)
       - [ ] C19 end-to-end workflow test + doc sync + delete `PROTO_PLAN.md`
