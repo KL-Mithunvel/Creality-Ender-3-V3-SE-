@@ -9,7 +9,7 @@ chunks. Each chunk: build → `pytest` green → stage → commit.
 |--|--|
 | Owner | kl mithunvel |
 | Created | 2026-09-09 |
-| Status | C1–C4 done (64 tests). C5 next. |
+| Status | C1–C5 done (91 tests). C6 next. |
 | Overall plan | `project/PROJECT_PLAN.md` |
 | Architecture / rules | `.CLAUDE/CLAUDE.md` |
 
@@ -209,10 +209,23 @@ launch the GUI, `tests/test_app.py` (mediator logic only, not widgets).
 
 ---
 
-### C5 — Real serial links
+### C5 — Real serial links  ✅
 
 **Goal.** `links/printer_serial.py` and `links/dispenser_serial.py`, plus a
 receive-line parser proven against synthetic firmware output.
+
+**Done:** `links/_marlin_rx.py` (`classify`, `parse_temps`, `parse_position`);
+`SerialPrinter` (`dtr=False` pre-open, `M115` handshake tolerating the banner,
+`wait_ok` resets its deadline on `busy:` and skips `wait`, `Resend:`→
+`ResendRequested`, `Error:`→`PrinterError`; modes+feed tracked from the outgoing
+stream, temps+position absorbed from `ok`/`M114`; `query_state()` issues
+`M400`+`M114`); `SerialDispenser` (rides the ~2 s Uno reset, PINGs to `PONG`,
+`DISPENSE`/`RESET`/`STATUS`, `ERR…`→`DispenserError`). Each link module has a
+`--ping` CLI; `magnet_embed/main.py` is the hardware entry point (`--ping` smoke
+test, else the panel on real links). Tested with an injected `FakeSerial`
+transport — no pyserial needed in the tests. 27 new tests (91 total). **Hardware
+smoke test on the actual printer is still a manual step** (`.CLAUDE/CLAUDE.md` →
+Deployment Notes).
 
 **Files:** `magnet_embed/links/printer_serial.py`, `magnet_embed/links/dispenser_serial.py`,
 `magnet_embed/links/_marlin_rx.py` (line classifier), fault-injection knobs in

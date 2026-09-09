@@ -58,10 +58,11 @@ involvement is acceptable at this stage.
 
 ## Running the System
 
-> Build status: **C1–C4 done** (`project/BUILD_PLAN.md`) — sim pipeline runs the full
-> insert sequence, `postprocess` injects the sentinel, and there's a Tkinter panel
-> (`python -m magnet_embed.main_sim --gui`). The real serial links (C5) and
-> integration/sanity pass (C6) are not done yet. venv first, always.
+> Build status: **C1–C5 done** (`project/BUILD_PLAN.md`) — sim pipeline + insert
+> sequence + `postprocess` + Tkinter panel + real serial links (`SerialPrinter`,
+> `SerialDispenser`, `main.py`), all unit-tested (91). **C6** (integration test +
+> run logging + full sanity pass) and the **manual hardware smoke test** remain.
+> venv first, always.
 
 ```bat
 :: one-time setup (Windows)
@@ -80,8 +81,9 @@ python -m py_compile magnet_embed\*.py
 :: G-code prep: inject the magnet sentinel at a layer (postprocess lands in C3)
 python -m magnet_embed.gcode.postprocess part.gcode --layer 40 --xy 120.5 98 --seat-z 6.2 --shear +X -o part.magnet.gcode
 
-:: hardware run (main.py + real serial land in C5) — after the pre-hardware checklist
-python magnet_embed\main.py
+:: hardware — after the pre-hardware checklist
+python -m magnet_embed.main --ping        :: connect to printer + Uno, report, exit
+python -m magnet_embed.main               :: control panel on real hardware
 ```
 
 Config: `magnet_embed/config.yaml` holds committed defaults; a git-ignored
@@ -105,10 +107,11 @@ the same `magnet_embed/config.yaml`.
 | `magnet_embed/main_sim.py` | Dev entry point — simulated printer + simulated dispenser. |
 | `magnet_embed/state.py` | `PrinterState` dataclass (position, temps, connection, run status) + `MagnetInsert` (parsed sentinel fields). |
 | `magnet_embed/links/printer_link.py` | Abstract `PrinterLink` — `connect`, `send_line`, `wait_ok`, `query_state`, `disconnect`. |
-| `magnet_embed/links/printer_serial.py` | Real printer link — `pyserial` / `printrun.printcore`, 115200, `ok`-handshake, temp parsing. |
+| `magnet_embed/links/_marlin_rx.py` | Classify a received line (`ok`/`wait`/`busy`/`resend`/`error`/`action`/`info`) + parse temps / `M114` position. Pure, unit-tested. |
+| `magnet_embed/links/printer_serial.py` | `SerialPrinter` — real printer over `pyserial`, 115200, `dtr=False` pre-open, `M115` handshake, `ok`-handshake with `busy`/`wait`/`resend`/`error` handling; `query_state()` = `M400`+`M114`. `--ping` CLI. |
 | `magnet_embed/links/printer_sim.py` | Simulated printer — consumes G-code, tracks X/Y/Z/E and temps, emits `ok`, raises the same exceptions as the real link. |
 | `magnet_embed/links/dispenser_link.py` | Abstract `DispenserLink` — `ping`, `dispense`, `reset`, `status`. |
-| `magnet_embed/links/dispenser_serial.py` | Real dispenser link — newline ASCII serial to the Arduino Uno; handles the Uno's ~2 s auto-reset on connect. |
+| `magnet_embed/links/dispenser_serial.py` | `SerialDispenser` — newline ASCII to the Arduino Uno; rides the ~2 s auto-reset then PINGs to `PONG`; `DISPENSE`/`RESET`/`STATUS`, `ERR…`→`DispenserError`. `--ping` / `--dispense` CLI. |
 | `magnet_embed/links/dispenser_sim.py` | Simulated dispenser — returns `OK DISPENSE` / `ERR` like the real Uno. |
 | `magnet_embed/gcode/runner.py` | `GcodeRunner` — streams lines, waits for `ok`, detects + parses the sentinel, handles pause / resume / cancel. |
 | `magnet_embed/gcode/postprocess.py` | Inserts the `;MAGNET_INSERT X Y Z S<dir>` sentinel comment at a chosen layer / height. |
@@ -178,13 +181,11 @@ hardware attached.
 
 ## Key Modules
 
-> Built (C1–C4): `config`, `state`, `exceptions`, `links/base` + `printer_sim` +
-> `dispenser_sim`, `gcode/util` + `gcode/sentinel` + `gcode/runner` +
-> `gcode/postprocess`, `sequences/insert_magnet`, `app.Controller` (threaded
-> mediator), `ui/panel` (Tkinter), `main_sim` (`--gui`).
-> Not built: `printer_serial` / `dispenser_serial` / `main` (C5), integration (C6).
+> Built (C1–C5): everything below. Not built: the C6 integration test + run
+> logging; the manual hardware smoke test.
 > Actual layout: text/number helpers are in `gcode/util.py`; both ABCs in
-> `links/base.py`; the UI↔worker mediator is `app.Controller`, not inside `ui/`.
+> `links/base.py`; the Marlin receive-line classifier is `links/_marlin_rx.py`;
+> the UI↔worker mediator is `app.Controller`, not inside `ui/`.
 
 ### `links/printer_link.py` — `PrinterLink` (abstract)
 - `connect() -> None` — open the port, wait for the firmware banner. Raises `PrinterConnectionError`.
@@ -316,8 +317,10 @@ tracked file.
 
 - **Host OS:** Windows 11 (the owner's machine). Code should also run on Linux / Raspberry Pi OS —
   the only OS-specific surface is serial port naming (`COM3` vs `/dev/ttyUSB0`), which comes from config.
-- **`pyserial`** is the cross-platform serial layer. `printrun` / `printcore` is optional and used
-  only inside `printer_serial.py`.
+- **`pyserial`** is the cross-platform serial layer (imported lazily inside the
+  `*_serial.py` modules; the sims and the tests don't need it — tests inject a fake
+  transport). `printrun` / `printcore` is **not** a dependency — the streaming loop is
+  our own (`GcodeRunner` + `SerialPrinter`).
 - **Two hardware dependencies**, each with a simulated twin (CLAUDE-COMMON rule 2):
   - Ender-3 V3 SE over USB-C serial → `printer_sim.py`
   - Arduino Uno (magazine servo) over USB serial → `dispenser_sim.py`
@@ -362,8 +365,9 @@ and switching entry point — there is no code transfer.
 ### Hardware smoke test
 
 ```bat
-python -m magnet_embed.links.printer_serial    --ping   :: expect firmware banner / ok to M115
-python -m magnet_embed.links.dispenser_serial  --ping   :: expect PONG          (Phase 2)
+python -m magnet_embed.main --ping                      :: both devices at once
+python -m magnet_embed.links.printer_serial    --ping   :: printer only (M115 -> ok)
+python -m magnet_embed.links.dispenser_serial  --ping   :: Uno only (-> PONG)   (Phase 2)
 ```
 
 Then: short air-print (Z raised, no filament) with a sentinel near layer 2 — head

@@ -176,5 +176,25 @@
 - `test_app.py` — 8 mediator tests (full run w/ prompt, abort, jog-idle,
   jog-rejected-running, pause/resume, cancel, no-file, load-rejected). 64 total.
 - GUI smoke-tested: `ControlPanel` constructs + `root.update()` runs clean.
-- Next: C5 — real serial links (`printer_serial`, `dispenser_serial`, Marlin rx parser).
+
+## 2026-09-09 — C5: real serial links
+
+- `links/_marlin_rx.py` — `classify(line)` → `ok`/`wait`/`busy`/`resend`/`error`/
+  `action`/`info`; `parse_temps`, `parse_position` (M114). Pure, 13 tests.
+- `SerialPrinter` — lazy `import serial`; `dtr=False` before open (Creality reset
+  guard); `connect()` = settle + drain + `M115`→`ok` tolerating the banner;
+  `wait_ok` resets its deadline on `busy:`, ignores `wait`, raises `ResendRequested`
+  / `PrinterError`; G90/G91/M82/M83/feed tracked from the outgoing stream, temps +
+  position absorbed from `ok`/`M114`; `query_state()` sends `M400`+`M114`.
+- `SerialDispenser` — rides the ~2 s Uno reset, retries `PING`→`PONG`;
+  `_cmd(send, expect_prefix)` ignores boot noise, raises `DispenserError` on `ERR`
+  / timeout; `dispense`/`reset`/`status`.
+- `magnet_embed/main.py` — hardware entry: `--ping` smoke test (both devices) else
+  the Tkinter panel on real links. `--ping` CLIs on each link module too.
+- Tests inject a `FakeSerial(responder)` transport via `transport_factory=` — no
+  pyserial in the test path. 27 new tests, 91 total.
+- Slow-test fix: `SerialDispenser` got a `ping_timeout_s` (default 1.0) so the
+  5×-retry connect loop and the no-pong test don't burn 10 s.
+- **Not done:** real hardware smoke test (needs the printer + a wired Uno).
+- Next: C6 — integration sim test + run logging + full sanity pass.
 

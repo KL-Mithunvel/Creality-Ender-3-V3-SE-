@@ -32,6 +32,8 @@ criteria, risks). Architecture and rules: `.CLAUDE/CLAUDE.md`. Keep all three in
       sentinel injection by layer or Z height); 56 tests pass.
 - [x] **C4** — `app.Controller` (threaded mediator) + `ui/panel.py` Tkinter control
       panel + modal Success/Retry/Abort prompt; `main_sim --gui`; 64 tests pass.
+- [x] **C5** — `links/_marlin_rx.py` + `SerialPrinter` + `SerialDispenser` + `main.py`
+      + `--ping` CLIs, tested via an injected fake serial; 91 tests pass.
 
 ## Not Started
 
@@ -48,8 +50,9 @@ Chunked in `project/BUILD_PLAN.md` — one commit per chunk.
 - [x] C2 `sequences/insert_magnet.py` — SAVE…RESUME state machine against the sim + tests (44 pass)
 - [x] C3 `gcode/postprocess.py` — `;MAGNET_INSERT X Y Z S<dir>` injection + CLI + tests (56 pass)
 - [x] C4 `app.Controller` mediator + `ui/panel.py` Tkinter panel + modal prompt (64 pass)
-- [ ] C5 Real serial: `printer_serial` + `dispenser_serial` + Marlin rx parser + tests
+- [x] C5 `_marlin_rx` + `printer_serial` + `dispenser_serial` + `main.py` + `--ping` CLIs (91 pass)
 - [ ] C6 Integration sim test, run logging, full sanity pass
+- [ ] Hardware smoke test on the real printer + Uno (manual; needs the applicator)
 - [ ] Pre-hardware gate passed
 - [ ] Full hardware print completes with one operator-driven insert
 
