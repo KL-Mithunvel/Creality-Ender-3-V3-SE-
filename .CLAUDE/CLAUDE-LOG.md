@@ -127,8 +127,21 @@
 - 44 tests pass (11 new in `test_insert_magnet.py`); `py_compile` clean.
 - Next: C3 — `gcode/postprocess.py` (sentinel injection + CLI).
 
-## Pending user requests (not yet done)
-- Write a plain-language "how it all works" MD doc (detailed but simple).
-- Review `docs/Invention DisclosureForm -Khurana & Khurana.docx` and help fill it
-  for a patent application (owner + a friend, via a college teacher).
+## 2026-09-09 — Plain-language guide + patent disclosure draft
+
+- Wrote `project/HOW_IT_WORKS.md` — plain-language walkthrough: the idea, the
+  hardware, the G-code / ok-handshake / M400 / sentinel mechanics, the insert
+  sequence phase-by-phase with rationale, module-by-module software map, why the
+  simulator exists, glossary.
+- Read `docs/Invention DisclosureForm -Khurana & Khurana.docx` (27-question K&K
+  form) and wrote `docs/INVENTION_DISCLOSURE_DRAFT.md` — drafted answers for all 27
+  from the project docs, with `[INVENTORS TO COMPLETE]` markers for prior-art
+  search, drawings, companies, market figures, validation data, inventor details.
+  Flagged: this repo has a remote — **public disclosure risk**, consult the K&K
+  agent before publishing; confirm college IP policy + the teacher's role.
+- `~$*` added to `.gitignore`; the `.docx` itself is committed as project material.
+- Docs cross-linked from README + CLAUDE.md.
+- Cleanup: C2's `git add -A` had also swept the user-dropped `.docx` **and** a Word
+  `~$` lock file into commit c5c647e. Lock file removed from tracking here
+  (`git rm --cached`), now gitignored. The `.docx` is kept (wanted project material).
 

@@ -41,8 +41,10 @@ python magnet_embed\main.py         :: hardware — after the pre-hardware check
 | File | What |
 |------|------|
 | `.CLAUDE/CLAUDE.md` | Full project brief — architecture, modules, conventions, rules |
+| `project/HOW_IT_WORKS.md` | Plain-language walkthrough of the whole system (start here if new) |
 | `project/PROJECT_PLAN.md` | Multi-phase plan — goals, steps, files, success criteria, risks, checklist |
 | `project/BUILD_PLAN.md` | Software build broken into commit-sized chunks (C1–C6) + protocol notes + references |
+| `docs/INVENTION_DISCLOSURE_DRAFT.md` | Working draft of the patent disclosure form (for inventor + attorney review) |
 | `TODO.md` | Task tracker (mirrors the plan checklists) |
 | `.CLAUDE/CLAUDE-LOG.md` | Session-by-session history |
 

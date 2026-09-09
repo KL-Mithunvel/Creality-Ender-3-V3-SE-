@@ -2,6 +2,9 @@
 .idea/
 .vscode/
 
+# Office lock files
+~$*
+
 # Python
 venv/
 .venv/

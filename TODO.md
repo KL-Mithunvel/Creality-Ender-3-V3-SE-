@@ -6,8 +6,14 @@ criteria, risks). Architecture and rules: `.CLAUDE/CLAUDE.md`. Keep all three in
 
 ## In Progress
 
+- [ ] C3–C6 (see `project/BUILD_PLAN.md`)
+- [ ] Patent: fill the `[INVENTORS TO COMPLETE]` sections of `docs/INVENTION_DISCLOSURE_DRAFT.md`,
+      run a prior-art search with the K&K agent, confirm college IP policy
 
 ## Done
+
+- [x] Write `project/HOW_IT_WORKS.md` (plain-language system walkthrough).
+- [x] Draft `docs/INVENTION_DISCLOSURE_DRAFT.md` from the K&K form (27 answers + gaps marked).
 
 - [x] Scope printer-control options and pick a direction — Python host script (`pyserial` /
       `printrun.printcore`) + Tkinter panel; PC tethered over USB-C, no Raspberry Pi.
