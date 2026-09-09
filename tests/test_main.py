@@ -1,4 +1,4 @@
-"""C8 full-hardware entry point — runs without the Arduino."""
+"""`python -m magnet_embed.main` — full-hardware entry point, runs without the Uno."""
 
 from __future__ import annotations
 
@@ -28,24 +28,28 @@ def sim_printer(monkeypatch):
         made.append(p)
         return p
 
-    monkeypatch.setattr(main_mod, "SerialPrinter", factory)
+    monkeypatch.setattr("magnet_embed.links.printer_serial.SerialPrinter", factory)
     return made
 
 
 @pytest.fixture
 def no_gui(monkeypatch):
     seen: dict = {}
-    import magnet_embed.ui.panel as panel_mod
-
-    monkeypatch.setattr(panel_mod, "run_gui", lambda c: seen.setdefault("controller", c))
+    monkeypatch.setattr(
+        "magnet_embed.ui.panel.run_gui", lambda c: seen.setdefault("controller", c)
+    )
     return seen
 
 
-def test_ping_no_dispenser_skips_the_uno(sim_printer, monkeypatch, capsys):
+def _no_serial_dispenser(monkeypatch):
     monkeypatch.setattr(
-        main_mod, "SerialDispenser",
+        "magnet_embed.links.dispenser_serial.SerialDispenser",
         lambda *a, **k: pytest.fail("SerialDispenser built despite --no-dispenser"),
     )
+
+
+def test_ping_no_dispenser_skips_the_uno(sim_printer, monkeypatch, capsys):
+    _no_serial_dispenser(monkeypatch)
     rc = main_mod.main(["--ping", "--no-dispenser"])
     out = capsys.readouterr().out
     assert rc == 0
@@ -54,14 +58,18 @@ def test_ping_no_dispenser_skips_the_uno(sim_printer, monkeypatch, capsys):
 
 
 def test_ping_reports_dispenser_failure(sim_printer, monkeypatch, capsys):
-    monkeypatch.setattr(main_mod, "SerialDispenser", FakeDispenser)
+    monkeypatch.setattr(
+        "magnet_embed.links.dispenser_serial.SerialDispenser", FakeDispenser
+    )
     rc = main_mod.main(["--ping"])
     assert rc == 1
     assert "dispenser FAIL" in capsys.readouterr().err
 
 
 def test_gui_starts_even_when_the_uno_is_absent(sim_printer, no_gui, monkeypatch):
-    monkeypatch.setattr(main_mod, "SerialDispenser", FakeDispenser)
+    monkeypatch.setattr(
+        "magnet_embed.links.dispenser_serial.SerialDispenser", FakeDispenser
+    )
     rc = main_mod.main([])
     assert rc == 0
     ctl = no_gui["controller"]
@@ -70,10 +78,7 @@ def test_gui_starts_even_when_the_uno_is_absent(sim_printer, no_gui, monkeypatch
 
 
 def test_no_dispenser_flag_builds_controller_with_none(sim_printer, no_gui, monkeypatch):
-    monkeypatch.setattr(
-        main_mod, "SerialDispenser",
-        lambda *a, **k: pytest.fail("SerialDispenser built despite --no-dispenser"),
-    )
+    _no_serial_dispenser(monkeypatch)
     rc = main_mod.main(["--no-dispenser"])
     assert rc == 0
     assert no_gui["controller"].dispenser is None

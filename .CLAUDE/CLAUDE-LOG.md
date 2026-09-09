@@ -310,3 +310,32 @@
 - C9–C12 (Pronterface-grade panel polish) paused pending the new plan. `BUILD_PLAN.md`
   Phase 1.5 to be superseded by the new plan doc once the owner confirms direction.
 
+
+---
+
+## 2026-09-09 — Phase 1.6 planned; C13 done
+
+- Owner reviewed what's built vs missing and confirmed: no slicing (he brings a
+  finished slice from Creality Print), one `main.py`, visualise the toolpath and
+  the magnet-insert motion before hardware, place the sentinel + save from the GUI,
+  then stream. Build all of C13–C19, commit between each.
+- `project/BUILD_PLAN.md` gained **Phase 1.6 (C13–C19)**. Supersedes the
+  never-executed `project/PROTO_PLAN.md` (deleted in C19); its one durable call —
+  drop the slicer — is folded in. We extend `magnet_embed/`, not rewrite it.
+- Visualisation decision: **matplotlib embedded in the Tk panel** (closest to the
+  browser render the owner approved, stays in-app). HTML-export fallback noted.
+
+### C13 — root `main.py` + `magnet_embed/entry.py` + raw G-code entry ✅ (130 tests)
+
+- `magnet_embed/entry.py`: `build_links(mode, config)` → `(printer, dispenser)`,
+  `ping()`, `run_headless()`, `launch_panel()`. Link construction + the `--ping`
+  smoke test now live here once (DRY).
+- Root `main.py`: `--sim` (default) / `--printer` / `--hardware`; `--ping`,
+  `--no-gui` (+ `--confirm`), `--no-dispenser`, `--config`, `-v`, optional `gcode`.
+- `magnet_embed/main.py` / `main_printer.py` / `main_sim.py` refactored to thin
+  wrappers over `entry` with a fixed mode. Their tests re-point the monkeypatch to
+  the link source modules (lazy import). New `tests/test_entry.py`,
+  `test_main_root.py`, `test_main_sim.py`.
+- `Controller.send_command(line)` — raw G-code, idle only, `> line` / `< reply` to
+  the log, `PrinterError`/`AckTimeout`/`ResendRequested` → `error` event. Panel got
+  a "Send G-code" entry + button, disabled while running.

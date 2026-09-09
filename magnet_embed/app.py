@@ -19,7 +19,13 @@ import threading
 from pathlib import Path
 
 from .config import load_config
-from .exceptions import DispenserError, SequenceAborted
+from .exceptions import (
+    AckTimeout,
+    DispenserError,
+    PrinterError,
+    ResendRequested,
+    SequenceAborted,
+)
 from .gcode.runner import GcodeRunner
 from .links.base import DispenserLink, PrinterLink
 from .runlog import RunLog, new_run_log
@@ -118,6 +124,24 @@ class Controller:
             return
         code = "M104" if which == "nozzle" else "M140"
         self.printer.command(f"{code} S{value:g}")
+        self._emit_state()
+
+    def send_command(self, line: str) -> None:
+        """Send one raw G-code line and echo the reply to the log. Idle only."""
+        line = line.strip()
+        if not line:
+            return
+        if self.running:
+            self._emit("log", f"command ignored - a run is active: {line}")
+            return
+        self._emit("log", f"> {line}")
+        try:
+            reply = self.printer.command(line)
+        except (PrinterError, AckTimeout, ResendRequested) as exc:
+            self._emit("error", f"{type(exc).__name__}: {exc}")
+            return
+        if reply:
+            self._emit("log", f"< {reply}")
         self._emit_state()
 
     def start_run(self) -> None:

@@ -25,20 +25,24 @@ part over the magnet**. Prototype-stage; manual operator involvement is expected
    away (lateral), asks the operator Success / Retry / Abort, then returns to the saved
    position and resumes so the remaining layers seal over the magnet. No homing mid-print.
 
-## Quick start (once code exists)
+## Quick start
 
 ```bat
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements-dev.txt
 
-python -m magnet_embed.main_sim --gui part.magnet.gcode   :: simulation — no hardware
-python -m magnet_embed.main_printer part.gcode            :: real printer, no dispenser — stream a print now
-python -m magnet_embed.main                               :: full hardware — after the pre-hardware checklist
+python main.py                          :: simulator + GUI — safe on any machine
+python main.py --printer part.gcode     :: real printer over USB, no dispenser
+python main.py --hardware               :: real printer + Arduino dispenser
+python main.py --hardware --ping        :: connect to both, report, exit
+python main.py --sim --no-gui part.gcode --confirm success   :: headless run
 ```
 
-Three entry points, one per hardware set-up (never a flag): `main_sim` (all
-simulated), `main_printer` (real printer, `dispenser=None`), `main` (printer + Uno).
+One entry point, mode chosen by flag: `--sim` (default) / `--printer` / `--hardware`.
+The `python -m magnet_embed.main*` modules still work (thin wrappers) for
+back-compat. Run the pre-hardware checklist in `.CLAUDE/CLAUDE.md` before
+`--printer` / `--hardware`.
 
 ## Documents
 

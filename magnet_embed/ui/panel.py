@@ -87,6 +87,15 @@ class ControlPanel(ttk.Frame):
                    command=lambda: self.c.set_temp("bed", _to_int(self.bed))).grid(row=0, column=5)
         row += 1
 
+        cmd = ttk.LabelFrame(self, text="Send G-code  (idle only)", padding=6)
+        cmd.grid(row=row, column=0, sticky="ew", pady=4)
+        self.cmd_entry = ttk.Entry(cmd)
+        self.cmd_entry.pack(side="left", fill="x", expand=True)
+        self.cmd_entry.bind("<Return>", lambda _e: self._send_cmd())
+        self.btn_send = ttk.Button(cmd, text="Send", command=self._send_cmd)
+        self.btn_send.pack(side="left", padx=4)
+        row += 1
+
         self.state_lbl = ttk.Label(self, text="position / temps: —")
         self.state_lbl.grid(row=row, column=0, sticky="w", pady=(4, 2))
         row += 1
@@ -97,6 +106,12 @@ class ControlPanel(ttk.Frame):
         self.columnconfigure(0, weight=1)
 
     # --- actions -------------------------------------------------
+
+    def _send_cmd(self) -> None:
+        line = self.cmd_entry.get()
+        if line.strip():
+            self.c.send_command(line)
+            self.cmd_entry.delete(0, "end")
 
     def _load(self) -> None:
         path = filedialog.askopenfilename(
@@ -145,6 +160,9 @@ class ControlPanel(ttk.Frame):
         )
         for btn in (self.btn_pause, self.btn_resume, self.btn_cancel):
             btn.configure(state=("normal" if running else "disabled"))
+        idle_state = "disabled" if running else "normal"
+        self.btn_send.configure(state=idle_state)
+        self.cmd_entry.configure(state=idle_state)
 
     def _show_prompt(self, stage: str) -> None:
         if self._prompt_open:

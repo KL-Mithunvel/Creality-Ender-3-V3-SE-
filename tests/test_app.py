@@ -150,3 +150,45 @@ def test_healthy_dispenser_connects_when_optional(config):
     ctl = Controller(SimPrinter(), SimDispenser(), config, dispenser_optional=True)
     ctl.connect()
     assert isinstance(ctl.dispenser, SimDispenser)
+
+
+# --- C13: raw G-code entry ------------------------------------------
+
+def test_send_command_echoes_reply(config):
+    ctl = _ctl(config)
+    ctl.send_command("M114")
+    events = [(k, str(p)) for k, p in ctl.poll_events()]
+    assert ("log", "> M114") in events
+    assert any(k == "log" and p.startswith("< ") for k, p in events)
+
+
+def test_send_command_blank_is_a_noop(config):
+    ctl = _ctl(config)
+    ctl.poll_events()  # drain the connect events
+    before = list(ctl.printer.sent)
+    ctl.send_command("   ")
+    assert ctl.printer.sent == before
+    assert ctl.poll_events() == []
+
+
+def test_send_command_ignored_while_running(config):
+    ctl = _ctl(config, delay=0.03)
+    ctl.load_gcode(SAMPLE)
+    ctl.start_run()
+    assert _wait(lambda: ctl.running)
+    ctl.send_command("M114")
+    assert any(k == "log" and "run is active" in str(p) for k, p in ctl.poll_events())
+    _pump_until(ctl, "done", answer="success")
+
+
+def test_send_command_surfaces_printer_error(config):
+    ctl = _ctl(config)
+
+    def boom(_line, timeout_s=None):
+        from magnet_embed.exceptions import PrinterError
+
+        raise PrinterError("MAXTEMP triggered")
+
+    ctl.printer.command = boom
+    ctl.send_command("M104 S999")
+    assert any(k == "error" for k, _ in ctl.poll_events())

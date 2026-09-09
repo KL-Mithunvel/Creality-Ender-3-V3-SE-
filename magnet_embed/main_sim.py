@@ -1,4 +1,7 @@
-"""Simulation entry point (no hardware).
+"""Simulation entry point — no hardware.
+
+Prefer ``python main.py`` (sim is the default mode) at the repo root. Kept as
+``python -m magnet_embed.main_sim`` for back-compat; thin-wraps `magnet_embed.entry`.
 
 Headless:
 
@@ -17,70 +20,8 @@ import argparse
 import logging
 import sys
 
+from . import entry
 from .config import load_config
-from .exceptions import SequenceAborted
-from .gcode.runner import GcodeRunner
-from .links.dispenser_sim import SimDispenser
-from .links.printer_sim import SimPrinter
-from .sequences.insert_magnet import insert_magnet
-from .state import MagnetInsert
-
-log = logging.getLogger("magnet_embed.main_sim")
-
-
-def _make_on_sentinel(printer, dispenser, config, confirm: str):
-    def _on_sentinel(mi: MagnetInsert) -> None:
-        log.info(
-            "SENTINEL  X%.3f Y%.3f Z%.3f S%s  -> running insert sequence",
-            mi.pocket_x, mi.pocket_y, mi.seat_z, mi.shear_dir,
-        )
-        insert_magnet(
-            printer, dispenser, mi, config,
-            lambda stage: confirm if stage == "confirm" else "ready",
-        )
-        log.info("insert sequence done -> resuming stream")
-
-    return _on_sentinel
-
-
-def _run_headless(args, config) -> int:
-    printer = SimPrinter()
-    dispenser = SimDispenser()
-    printer.connect()
-    dispenser.connect()
-
-    runner = GcodeRunner(
-        printer, args.gcode,
-        _make_on_sentinel(printer, dispenser, config, args.confirm), config,
-    )
-    log.info("streaming %s through SimPrinter", args.gcode)
-    try:
-        runner.run()
-    except SequenceAborted as exc:
-        log.error("run stopped: %s", exc)
-        return 1
-
-    st = printer.query_state()
-    log.info(
-        "done: %d/%d lines sent, %d sentinel(s), %d magnet(s); final X%.2f Y%.2f Z%.2f, nozzle %.0f/%.0f",
-        runner.sent_lines, runner.total_lines, runner.sentinels_seen, dispenser.count,
-        st.x, st.y, st.z, st.nozzle_temp, st.nozzle_target,
-    )
-    return 0
-
-
-def _run_gui(args, config) -> int:
-    from .app import Controller
-    from .ui.panel import run_gui
-
-    controller = Controller(
-        SimPrinter(command_delay=0.03), SimDispenser(), config, log_dir="logs"
-    )
-    controller.connect()
-    if args.gcode:
-        controller.load_gcode(args.gcode)
-    run_gui(controller)
-    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -105,10 +46,15 @@ def main(argv: list[str] | None = None) -> int:
     config = load_config(args.config)
 
     if args.gui:
-        return _run_gui(args, config)
+        printer, dispenser = entry.build_links("sim", config, command_delay=0.03)
+        return entry.launch_panel(
+            printer, dispenser, config, dispenser_optional=False, gcode=args.gcode
+        )
+
     if not args.gcode:
         parser.error("a .gcode file is required unless --gui is given")
-    return _run_headless(args, config)
+    printer, dispenser = entry.build_links("sim", config, command_delay=0.0)
+    return entry.run_headless(printer, dispenser, config, args.gcode, confirm=args.confirm)
 
 
 if __name__ == "__main__":

@@ -40,7 +40,7 @@ def fake_serial(monkeypatch):
         made.append(p)
         return p
 
-    monkeypatch.setattr(main_printer, "SerialPrinter", factory)
+    monkeypatch.setattr("magnet_embed.links.printer_serial.SerialPrinter", factory)
     return made
 
 
@@ -53,7 +53,7 @@ def test_ping_ok(fake_serial, capsys):
 
 def test_ping_failure_returns_1(fake_serial, monkeypatch, capsys):
     monkeypatch.setattr(
-        main_printer, "SerialPrinter",
+        "magnet_embed.links.printer_serial.SerialPrinter",
         lambda *a, **k: FakePrinter(*a, fail=True, **k),
     )
     rc = main_printer.main(["--ping"])
