@@ -10,6 +10,7 @@ does the park / insert / resume in later chunks).
 
 from __future__ import annotations
 
+import logging
 import threading
 from collections.abc import Callable
 from pathlib import Path
@@ -20,7 +21,13 @@ from ..state import MagnetInsert
 from .sentinel import parse_sentinel
 from .util import strip_comment
 
+log = logging.getLogger(__name__)
+
 OnSentinel = Callable[[MagnetInsert], None]
+
+#: firmware-pause commands we never forward — the host owns the pause and the
+#: insert sequence does the parking (`.CLAUDE/CLAUDE.md` → Key Conventions).
+_PAUSE_CODES = ("M0", "M1", "M25", "M600", "M601")
 
 
 class GcodeRunner:
@@ -46,6 +53,7 @@ class GcodeRunner:
         self.sent_lines = 0
         self.current_line = 0
         self.sentinels_seen = 0
+        self.pauses_skipped = 0
         self.finished = False
 
     # --- control (call from any thread) --------------------------------
@@ -94,8 +102,19 @@ class GcodeRunner:
                 self.on_sentinel(mi)
                 continue
 
-            if not strip_comment(line).strip():
+            bare = strip_comment(line).strip()
+            if not bare:
                 continue                  # pure comment — don't bother the printer
+
+            head = bare.split(maxsplit=1)[0].upper()
+            if head in _PAUSE_CODES:
+                self.pauses_skipped += 1
+                log.info(
+                    "skipping %s at line %d — the host owns the pause; "
+                    "the insert sequence handles parking",
+                    head, index,
+                )
+                continue
 
             self.link.send_line(raw)
             self.link.wait_ok(self._ack_timeout)

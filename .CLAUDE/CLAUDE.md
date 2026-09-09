@@ -59,16 +59,15 @@ involvement is acceptable at this stage.
 
 ## Running the System
 
-> Build status: **C1–C8 done — Phase 1 software complete** (`project/BUILD_PLAN.md`).
-> Sim pipeline + insert sequence + `postprocess` + Tkinter panel + real serial links
-> + per-run logging + integration test; sanity checklist passed. Printer serial link
-> verified on real hardware (COM3). **Phase 1.6 (C13–C19) in progress** — one root
-> `main.py` (mode by flag), `gcode/toolpath.py`, shared `plan_insert_moves`,
-> matplotlib toolpath + insert-motion preview, a "Plan magnet insert" dialog that
-> saves `*.magnet.gcode`, plus the panel polish absorbed from C9–C12. **C13 done**
-> — root `main.py` + `magnet_embed/entry.py` + raw G-code entry (130 tests). What
-> remains for the magnet flow is hardware: build the applicator, wire the Uno,
-> measure the offset, run the **manual** hardware smoke test. `.venv` first, always.
+> Build status: **C1–C8 + Phase 1.6 (C13–C19) done — 170 tests** (`project/BUILD_PLAN.md`).
+> One root `python main.py` (mode by flag), `gcode/toolpath.py`, shared
+> `sequences/geometry.py`, a matplotlib toolpath + insert-motion preview
+> (`main.py --preview`), a "Plan magnet insert…" dialog that saves
+> `*.magnet.gcode`, and the panel polish (raw G-code, idle poll, extrude/retract,
+> progress bar). `GcodeRunner` skips firmware-pause codes (`M0`/`M1`/`M25`/`M600`/`M601`).
+> Printer serial link verified on real hardware (COM3). What remains for the magnet
+> flow is hardware: build the applicator, wire the Uno, measure the offset, run the
+> **manual** hardware smoke test. `.venv` first, always.
 
 ```bat
 :: one-time setup (Windows) — the project venv is `.venv`
@@ -129,7 +128,7 @@ back-compat wrappers that call `entry` with a fixed mode.
 | `magnet_embed/links/dispenser_link.py` | Abstract `DispenserLink` — `ping`, `dispense`, `reset`, `status`. |
 | `magnet_embed/links/dispenser_serial.py` | `SerialDispenser` — newline ASCII to the Arduino Uno; rides the ~2 s auto-reset then PINGs to `PONG`; `DISPENSE`/`RESET`/`STATUS`, `ERR…`→`DispenserError`. `--ping` / `--dispense` CLI. |
 | `magnet_embed/links/dispenser_sim.py` | Simulated dispenser — returns `OK DISPENSE` / `ERR` like the real Uno. |
-| `magnet_embed/gcode/runner.py` | `GcodeRunner` — streams lines, waits for `ok`, detects + parses the sentinel, handles pause / resume / cancel. |
+| `magnet_embed/gcode/runner.py` | `GcodeRunner` — streams lines, waits for `ok`, detects + parses the sentinel, drops firmware-pause codes (`M0`/`M1`/`M25`/`M600`/`M601`), handles pause / resume / cancel. |
 | `magnet_embed/gcode/postprocess.py` | Inserts the `;MAGNET_INSERT X Y Z S<dir>` sentinel comment at a chosen layer / height. |
 | `magnet_embed/gcode/toolpath.py` | `parse_toolpath(path) -> Toolpath` — a slice as ordered `Segment`s (travel vs extrude), a layer→Z table (slicer markers, else Z-derived), bounding box, distances, rough time. Feeds the visualisation + the plan dialog. |
 | `magnet_embed/viz/toolpath_fig.py` | Pure preview helpers (`nozzle_waypoints`, `pole_waypoints`, `sample_polyline`, `state_at_z`) + matplotlib `draw_*` functions (layer X–Y, side X–Z, 3D path, phase-coloured insert overlay). No GUI backend. |
@@ -229,6 +228,7 @@ hardware attached.
 - `__init__(link: PrinterLink, gcode_path: str, on_sentinel: Callable[[MagnetInsert], None], config: dict)`.
 - `run() -> None` — stream every line, `wait_ok` after each; when a stripped line starts with the
   sentinel token, parse it into a `MagnetInsert` and call `on_sentinel(mi)` instead of sending it.
+  `M0`/`M1`/`M25`/`M600`/`M601` lines are skipped (`pauses_skipped`), never forwarded.
 - `pause()`, `resume()`, `cancel()` — thread-safe.
 - Side effects: reads the G-code file, writes to the printer link, appends to the run log.
 - Exceptions: `AckTimeout`, `SentinelNotFound` (if `require_sentinel` and EOF reached first), `SentinelParseError`.
@@ -308,6 +308,11 @@ hardware attached.
   `GcodeRunner` matches the line by prefix (after `.strip()`) against
   `config['gcode']['sentinel_token']` (default `;MAGNET_INSERT`), parses the fields into
   a `MagnetInsert`, fires the insert sequence, and does **not** send the line to the printer.
+- **Firmware-pause codes are dropped, not streamed.** `GcodeRunner` skips any
+  `M0` / `M1` / `M25` / `M600` / `M601` line (`pauses_skipped` counts them) — the
+  host owns the pause and the insert sequence does the parking. So a
+  `*.magnet.gcode` saved with the dialog's "also write a real `M0`" option still
+  streams cleanly through the host *and* pauses when printed straight from microSD.
 - **Magnet-tool offset.** `magnet_tool_offset: {x, y, z}` is **(holding-pole tip) −
   (nozzle tip)**, measured empirically with signs. `+z` means the pole tip sits above
   the nozzle tip. `insert_magnet` drives the carriage to `pocket_xy − (offset.x,
@@ -439,15 +444,23 @@ parks, magnet dispensed, controlled press + lateral shear run, print resumes and
 
 ## Known Technical Debt
 
-- **No hardware validation yet.** The whole stack is proven against `SimPrinter` /
-  `SimDispenser` (94 tests) but has never driven the real printer or a real Uno. The
-  first hardware run may surface firmware-serial quirks (the Ender-3 V3 SE has known
-  OctoPrint friction) and mechanism issues. Treat the first bench session as
-  debugging, not production.
+- **No hardware validation of the magnet flow yet.** The whole stack is proven
+  against `SimPrinter` / `SimDispenser` (170 tests); only the printer *serial link*
+  has run on the real machine (COM3). The first magnet-flow bench session may
+  surface firmware-serial quirks (the Ender-3 V3 SE has known OctoPrint friction)
+  and mechanism issues. Treat it as debugging, not production.
 - **Tool offset / press depth / shear params in `config.yaml` are guesses.** They must
   be measured on the real machine (`config.local.yaml`) — see `PROJECT_PLAN.md` §8.
 - **`dispenser_fw/` (the Arduino sketch) does not exist yet.** `SerialDispenser`
-  assumes the `PING`/`DISPENSE`/… protocol; the sketch must implement it.
+  assumes the `PING`/`DISPENSE`/… protocol; the sketch must implement it. Until then
+  every real run is `--printer` (or `--hardware` with the Uno absent) and the insert
+  falls back to the operator "Load a magnet" prompt.
+- **`matplotlib` added for `viz/`; `uv` migration still pending** (Dev Rule 9 — flag
+  when touching packaging).
+- **The preview's `saved` state is approximated** (`toolpath_fig.state_at_z`) — the
+  real run uses the true position at the sentinel. Fine for a sanity check; the
+  envelope numbers can differ slightly from the live run if the print is far from
+  the pocket XY when it pauses.
 
 No rule violations recorded. Add any here (file + line) as they appear; do not omit.
 

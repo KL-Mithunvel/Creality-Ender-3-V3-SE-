@@ -392,3 +392,25 @@
   (mm/feed + Extrude/Retract); panel-timer idle poll every `ui.idle_poll_s`.
 - New config key `ui.idle_poll_s` (default 2.0, validated >= 0, 0 disables).
 - `test_app.py` +6, `test_config.py` +2. (Old C9-C12 fully absorbed now.)
+
+### C19 — end-to-end workflow test + sanity pass ✅ (170 tests) — Phase 1.6 complete
+
+- `tests/test_workflow_sim.py` (2): raw slice -> parse_toolpath -> plan_insert_moves
+  + check_envelope -> save_magnet_gcode -> run_headless through SimPrinter ->
+  sentinel fires insert_magnet -> confirm=success -> EOF; plus the out-of-envelope
+  abort path.
+- `entry.run_headless` now returns 1 on any `MagnetEmbedError` (not just
+  `SequenceAborted`) so a bad plan reports cleanly headless.
+- `GcodeRunner` drops firmware-pause codes `M0`/`M1`/`M25`/`M600`/`M601`
+  (`pauses_skipped`) — an `emit_pause` file streams cleanly through the host and
+  still pauses on microSD. `tests/test_runner.py` +1.
+- Sanity scan: no `G28`/`M0`/`M25` emitted by any sequence path (only a docstring
+  mentions G28); every module `py_compile`s; `SimPrinter`<->`SerialPrinter` and
+  `SimDispenser`<->`SerialDispenser` public APIs are identical (empty symmetric diff).
+- Docs synced: CLAUDE.md (status, Key Conventions pause-skip bullet, runner section,
+  Known Technical Debt), README (How it works + Status), BUILD_PLAN (C13-C19 all
+  done + status line), TODO (Phase 1.6 -> Done).
+
+**Phase 1.6 done.** Remaining for the magnet flow is hardware: build the applicator,
+wire the Uno + write `dispenser_fw/`, measure `magnet_tool_offset`, run the manual
+smoke test.

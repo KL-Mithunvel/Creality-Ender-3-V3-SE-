@@ -106,7 +106,7 @@ def run_headless(
     ``confirm`` is one of ``success`` / ``retry`` / ``abort`` (used only at the
     ``"confirm"`` stage; the dispense prompt always gets ``"ready"``).
     """
-    from .exceptions import SequenceAborted
+    from .exceptions import MagnetEmbedError
     from .gcode.runner import GcodeRunner
     from .sequences.insert_magnet import insert_magnet
     from .state import MagnetInsert
@@ -129,8 +129,8 @@ def run_headless(
     log.info("streaming %s", gcode)
     try:
         runner.run()
-    except SequenceAborted as exc:
-        log.error("run stopped: %s", exc)
+    except MagnetEmbedError as exc:
+        log.error("run stopped: %s: %s", type(exc).__name__, exc)
         return 1
 
     st = printer.query_state()

@@ -9,7 +9,7 @@ chunks. Each chunk: build → `pytest` green → stage → commit.
 |--|--|
 | Owner | kl mithunvel |
 | Created | 2026-09-09 |
-| Status | **C1–C8 done, 105 tests.** Phase 1 software + printer-only entry point + `main` runs without the Uno. **Phase 1.6 (C13–C19) is the active plan** — one root entry point, bring-your-own-G-code, visual insert planning; it absorbs the paused C9–C12. Magnet-flow hardware smoke test still pending the applicator build. |
+| Status | **C1–C8 + Phase 1.6 (C13–C19) done — 170 tests.** One root `python main.py` (mode by flag), bring-your-own-G-code, toolpath + insert-motion preview, "Plan magnet insert…" dialog, panel polish. Magnet-flow hardware smoke test still pending the applicator build. |
 | Overall plan | `project/PROJECT_PLAN.md` |
 | Architecture / rules | `.CLAUDE/CLAUDE.md` |
 
@@ -647,7 +647,18 @@ Filament frame (mm/feed + Extrude/Retract), and a panel-timer idle poll every
 
 ---
 
-### C19 — End-to-end integration + docs + sanity pass  🟢
+### C19 — End-to-end integration + docs + sanity pass  ✅
+
+**Done:** `tests/test_workflow_sim.py` (2) — full path: raw slice → `parse_toolpath`
+→ `plan_insert_moves` + `check_envelope` → `save_magnet_gcode` → `run_headless`
+through `SimPrinter` → sentinel fires `insert_magnet` → `confirm→success` → EOF;
+plus the out-of-envelope abort path (`run_headless` now returns 1 on any
+`MagnetEmbedError`, not just `SequenceAborted`). `GcodeRunner` drops firmware-pause
+codes `M0`/`M1`/`M25`/`M600`/`M601` (`pauses_skipped`) so an `emit_pause` file
+streams cleanly (`tests/test_runner.py` +1). Docs synced (CLAUDE.md, README, TODO,
+this file). Sanity scan recorded in `CLAUDE-LOG.md`: no `G28`/`M0`/`M25` emitted by
+any sequence path; every module `py_compile`s; `SimPrinter`↔`SerialPrinter` and
+`SimDispenser`↔`SerialDispenser` public APIs identical. **170 tests.**
 
 - `tests/test_workflow_sim.py` — one test: load `sample.gcode` → `parse_toolpath` →
   `plan_insert_moves` → `inject_sentinel` → stream the saved file through `SimPrinter`

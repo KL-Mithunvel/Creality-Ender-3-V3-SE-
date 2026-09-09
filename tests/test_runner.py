@@ -80,3 +80,19 @@ def test_require_sentinel_errors_when_absent(config, tmp_path):
     _, runner, _ = _make(cfg, g)
     with pytest.raises(SentinelNotFound):
         runner.run()
+
+
+def test_pause_commands_are_not_forwarded(config, tmp_path):
+    src = tmp_path / "p.gcode"
+    src.write_text(
+        "G90\n;LAYER:0\nG1 Z0.2\nG1 X10 Y10 E1\n"
+        "M0 ; slicer pause\n"
+        ";MAGNET_INSERT X10 Y10 Z0.2 S+X\n"
+        "G1 X20 Y20 E2\n",
+        encoding="utf-8",
+    )
+    printer, runner, calls = _make(config, src)
+    runner.run()
+    assert runner.pauses_skipped == 1
+    assert not any(ln.strip().upper().startswith("M0") for ln in printer.sent)
+    assert len(calls) == 1                         # the sentinel still fired
