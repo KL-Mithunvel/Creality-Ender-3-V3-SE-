@@ -58,11 +58,11 @@ involvement is acceptable at this stage.
 
 ## Running the System
 
-> Build status: **C1–C5 done** (`project/BUILD_PLAN.md`) — sim pipeline + insert
-> sequence + `postprocess` + Tkinter panel + real serial links (`SerialPrinter`,
-> `SerialDispenser`, `main.py`), all unit-tested (91). **C6** (integration test +
-> run logging + full sanity pass) and the **manual hardware smoke test** remain.
-> venv first, always.
+> Build status: **C1–C6 done — Phase 1 software complete** (`project/BUILD_PLAN.md`).
+> Sim pipeline + insert sequence + `postprocess` + Tkinter panel + real serial links
+> + per-run logging + integration test; 94 tests, sanity checklist passed. What
+> remains is hardware: build the applicator, wire the Uno, measure the offset, run
+> the **manual** hardware smoke test. venv first, always.
 
 ```bat
 :: one-time setup (Windows)
@@ -116,7 +116,8 @@ the same `magnet_embed/config.yaml`.
 | `magnet_embed/gcode/runner.py` | `GcodeRunner` — streams lines, waits for `ok`, detects + parses the sentinel, handles pause / resume / cancel. |
 | `magnet_embed/gcode/postprocess.py` | Inserts the `;MAGNET_INSERT X Y Z S<dir>` sentinel comment at a chosen layer / height. |
 | `magnet_embed/sequences/insert_magnet.py` | The `SAVE → PARK → DISPENSE → APPROACH → PRESS → SHEAR → LIFT → ASK → RESUME` state machine. |
-| `magnet_embed/app.py` | `Controller` — headless UI↔worker mediator (threads, queues, prompt blocking). |
+| `magnet_embed/app.py` | `Controller` — headless UI↔worker mediator (threads, queues, prompt blocking); optional `log_dir` writes a per-run transcript. |
+| `magnet_embed/runlog.py` | `RunLog` — one `logs/<ts>-<name>.log` per streamed job, a timestamped line per event. |
 | `magnet_embed/ui/panel.py` | Tkinter panel — thin view over `Controller`; jog/home idle-only, modal Success/Retry/Abort prompt, live log. |
 | `dispenser_fw/` | Arduino Uno sketch for the magazine servo (Phase 2). |
 | `tests/` | `pytest` — runner, postprocess, insert state machine, printer sim, dispenser sim. |
@@ -386,7 +387,17 @@ parks, magnet dispensed, controlled press + lateral shear run, print resumes and
 
 ## Known Technical Debt
 
-_None — no code written yet. Record every rule violation here (file + line) as it appears; do not omit._
+- **No hardware validation yet.** The whole stack is proven against `SimPrinter` /
+  `SimDispenser` (94 tests) but has never driven the real printer or a real Uno. The
+  first hardware run may surface firmware-serial quirks (the Ender-3 V3 SE has known
+  OctoPrint friction) and mechanism issues. Treat the first bench session as
+  debugging, not production.
+- **Tool offset / press depth / shear params in `config.yaml` are guesses.** They must
+  be measured on the real machine (`config.local.yaml`) — see `PROJECT_PLAN.md` §8.
+- **`dispenser_fw/` (the Arduino sketch) does not exist yet.** `SerialDispenser`
+  assumes the `PING`/`DISPENSE`/… protocol; the sketch must implement it.
+
+No rule violations recorded. Add any here (file + line) as they appear; do not omit.
 
 ---
 

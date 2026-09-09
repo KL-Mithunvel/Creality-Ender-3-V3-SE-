@@ -22,6 +22,7 @@ from .config import load_config
 from .exceptions import SequenceAborted
 from .gcode.runner import GcodeRunner
 from .links.base import DispenserLink, PrinterLink
+from .runlog import RunLog, new_run_log
 from .sequences.insert_magnet import insert_magnet
 from .state import MagnetInsert
 
@@ -34,16 +35,20 @@ class Controller:
         printer: PrinterLink,
         dispenser: DispenserLink | None,
         config: dict | None = None,
+        *,
+        log_dir: str | Path | None = None,
     ) -> None:
         self.printer = printer
         self.dispenser = dispenser
         self.config = config or load_config()
+        self.log_dir = log_dir
         self.gcode_path: Path | None = None
         self.runner: GcodeRunner | None = None
 
         self._events: "queue.Queue[Event]" = queue.Queue()
         self._answers: "queue.Queue[str]" = queue.Queue()
         self._worker: threading.Thread | None = None
+        self._runlog: RunLog | None = None
 
     # --- state -------------------------------------------------------
 
@@ -109,6 +114,8 @@ class Controller:
         if self.gcode_path is None:
             self._emit("log", "no G-code file loaded")
             return
+        if self.log_dir is not None:
+            self._runlog = new_run_log(self.log_dir, self.gcode_path.stem)
         self.runner = GcodeRunner(
             self.printer, self.gcode_path, self._on_sentinel, self.config
         )
@@ -141,14 +148,17 @@ class Controller:
             self.runner.run()  # type: ignore[union-attr]
         except SequenceAborted as exc:
             self._emit("error", f"aborted: {exc}")
-            return
         except Exception as exc:  # noqa: BLE001 - surface anything to the UI
             self._emit("error", f"{type(exc).__name__}: {exc}")
-            return
-        r = self.runner
-        self._emit("done", {"sent": r.sent_lines, "total": r.total_lines,  # type: ignore[union-attr]
-                            "sentinels": r.sentinels_seen})
-        self._emit_state()
+        else:
+            r = self.runner
+            self._emit("done", {"sent": r.sent_lines, "total": r.total_lines,  # type: ignore[union-attr]
+                                "sentinels": r.sentinels_seen})
+            self._emit_state()
+        finally:
+            if self._runlog is not None:
+                self._runlog.close()
+                self._runlog = None
 
     def _on_sentinel(self, mi: MagnetInsert) -> None:
         self._emit(
@@ -167,6 +177,8 @@ class Controller:
 
     def _emit(self, kind: str, payload: object = None) -> None:
         self._events.put((kind, payload))
+        if self._runlog is not None:
+            self._runlog.write(kind, payload)
 
     def _emit_state(self) -> None:
         self._emit("state", self.printer.query_state())

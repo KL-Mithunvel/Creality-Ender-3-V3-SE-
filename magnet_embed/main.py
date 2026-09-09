@@ -73,7 +73,7 @@ def main(argv: list[str] | None = None) -> int:
     from .app import Controller
     from .ui.panel import run_gui
 
-    controller = Controller(printer, dispenser, config)
+    controller = Controller(printer, dispenser, config, log_dir="logs")
     try:
         controller.connect()
     except (PrinterConnectionError, DispenserError) as exc:

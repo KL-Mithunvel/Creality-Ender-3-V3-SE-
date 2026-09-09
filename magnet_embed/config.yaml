@@ -8,6 +8,7 @@ printer:
   port: COM3            # Windows device name; /dev/ttyUSB0 on Linux
   baud: 115200          # Ender-3 V3 SE
   ack_timeout_s: 30     # no `ok` and no busy/wait for this long -> AckTimeout
+  connect_settle_s: 2.0 # wait after opening the port before the M115 handshake
 
 dispenser:
   port: COM4            # Arduino Uno

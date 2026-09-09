@@ -460,10 +460,12 @@ simulation but not yet with hardware. Not yet TRL 4 (lab validation).
 
 ## 27. Additional notes / remarks
 
-- The software is being built in testable chunks (`project/BUILD_PLAN.md`): C1–C2
-  done (config, simulated printer, sentinel parser, streaming runner, full insert
-  state machine, 44 tests). C3–C6 (post-processor, UI, real serial links,
-  integration) pending. Mechanism (magazine/escapement/pole/mount) not yet built.
+- The host software is complete for Phase 1 (`project/BUILD_PLAN.md`, chunks C1–C6):
+  config, simulated + real printer/dispenser links, sentinel parser + post-processor,
+  streaming runner, the full park→dispense→press→shear→resume insert state machine,
+  a Tkinter control panel, per-run logging — **94 automated tests**, validated in
+  simulation only. The physical mechanism (magazine / escapement / holding pole /
+  mount) and the Arduino sketch are **not yet built**; no hardware run has happened.
 - Reference material and prior-art links: `project/BUILD_PLAN.md` → References.
 - **Before any public disclosure or repo publication, consult the K&K agent** (see
   the warning at the top).

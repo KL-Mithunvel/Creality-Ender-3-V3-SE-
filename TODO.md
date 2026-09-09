@@ -6,7 +6,8 @@ criteria, risks). Architecture and rules: `.CLAUDE/CLAUDE.md`. Keep all three in
 
 ## In Progress
 
-- [ ] C3–C6 (see `project/BUILD_PLAN.md`)
+- [ ] Hardware: build the clip-on applicator (magazine + escapement + holding pole + mount);
+      wire the Arduino Uno + servo; measure `magnet_tool_offset`; run the manual smoke test
 - [ ] Patent: fill the `[INVENTORS TO COMPLETE]` sections of `docs/INVENTION_DISCLOSURE_DRAFT.md`,
       run a prior-art search with the K&K agent, confirm college IP policy
 
@@ -34,6 +35,9 @@ criteria, risks). Architecture and rules: `.CLAUDE/CLAUDE.md`. Keep all three in
       panel + modal Success/Retry/Abort prompt; `main_sim --gui`; 64 tests pass.
 - [x] **C5** — `links/_marlin_rx.py` + `SerialPrinter` + `SerialDispenser` + `main.py`
       + `--ping` CLIs, tested via an injected fake serial; 91 tests pass.
+- [x] **C6** — `runlog.py` (per-run transcript), config numeric/type validation,
+      end-to-end integration test, full sanity checklist. 94 tests. Fixed a `RunLog`
+      RLock deadlock found by the integration test. **Phase 1 software complete.**
 
 ## Not Started
 
@@ -51,9 +55,8 @@ Chunked in `project/BUILD_PLAN.md` — one commit per chunk.
 - [x] C3 `gcode/postprocess.py` — `;MAGNET_INSERT X Y Z S<dir>` injection + CLI + tests (56 pass)
 - [x] C4 `app.Controller` mediator + `ui/panel.py` Tkinter panel + modal prompt (64 pass)
 - [x] C5 `_marlin_rx` + `printer_serial` + `dispenser_serial` + `main.py` + `--ping` CLIs (91 pass)
-- [ ] C6 Integration sim test, run logging, full sanity pass
+- [x] C6 `runlog.py` + integration sim test + config type-checks + full sanity pass (94 pass)
 - [ ] Hardware smoke test on the real printer + Uno (manual; needs the applicator)
-- [ ] Pre-hardware gate passed
 - [ ] Full hardware print completes with one operator-driven insert
 
 ### Phase 2 — magnet applicator (Arduino Uno + printer moves)

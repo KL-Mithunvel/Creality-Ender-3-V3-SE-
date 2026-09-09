@@ -196,5 +196,24 @@
 - Slow-test fix: `SerialDispenser` got a `ping_timeout_s` (default 1.0) so the
   5×-retry connect loop and the no-pong test don't burn 10 s.
 - **Not done:** real hardware smoke test (needs the printer + a wired Uno).
-- Next: C6 — integration sim test + run logging + full sanity pass.
+
+## 2026-09-09 — C6: integration test, run logging, sanity pass  (Phase 1 software complete)
+
+- `magnet_embed/runlog.py` — `RunLog` writes `logs/<ts>-<name>.log`, one timestamped
+  line per Controller event. `Controller(log_dir=…)` opts in; `main` and
+  `main_sim --gui` pass `log_dir="logs"` (git-ignored).
+- `config._validate` extended: numeric keys must be real numbers (not bool),
+  `gcode.sentinel_token` must be a `;` comment, `temps.standby_nozzle_c` number-or-null.
+  Added `printer.connect_settle_s` to `config.yaml`.
+- `tests/test_integration_sim.py` (full end-to-end run + abort, checks final
+  position/temp and run-log contents) + `tests/test_runlog.py`. 94 tests.
+- **Bug fixed:** `RunLog` used `threading.Lock` (non-reentrant); `close()` held it and
+  called `write()` → deadlock that hung the whole test run. Now `RLock`. The
+  integration test is what surfaced it.
+- Ran the C6 sanity checklist (results in `project/BUILD_PLAN.md` → C6): every config
+  key used; every exception raised; no `G28` in the sequence path, no `M0`/`M25`;
+  Sim/Serial link APIs identical; failure branches restore temp; docs synced;
+  `pytest` 94/94, `py_compile` clean, `main_sim` (headless + `--gui`) run.
+- **Phase 1 software is complete.** Remaining Phase 1/2 work is hardware: build the
+  applicator, write `dispenser_fw/`, measure the offset, run the manual smoke test.
 

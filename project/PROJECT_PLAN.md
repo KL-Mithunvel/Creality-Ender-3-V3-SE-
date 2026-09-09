@@ -5,7 +5,7 @@
 | Owner | kl mithunvel |
 | Created | 2026-09-09 |
 | Updated | 2026-09-09 |
-| Status | Planning — no code yet |
+| Status | Phase 1 **software** complete (94 tests, see `project/BUILD_PLAN.md`). Phase 0 (mechanical) and Phase 1/2 hardware not started. |
 | Full brief | `.CLAUDE/CLAUDE.md` |
 | Task tracker | `TODO.md` |
 | Session history | `.CLAUDE/CLAUDE-LOG.md` |
@@ -200,9 +200,14 @@ offset in config (rough is fine for the air-print) · stock firmware backup · W
 sleep disabled.
 
 **Phase 1 done when**
-- [ ] Simulation: full sample print completes with one operator-driven insert
+- [x] Simulation: full sample print completes with one operator-driven insert (`test_integration_sim.py`)
 - [ ] Hardware: same on the printer, on a Phase 0 coupon, nozzle hot, real filament
-- [ ] All 1.x success criteria met; tests cover happy path + ack timeout + bad sentinel + out-of-envelope
+- [x] All 1.x success criteria met; tests cover happy path + ack timeout + bad sentinel + out-of-envelope (94 tests)
+
+> Implementation notes: built as chunks C1–C6 (`project/BUILD_PLAN.md`). Deviations
+> from this table: helpers landed in `gcode/util.py`; the UI mediator is a separate
+> `app.Controller`; the Marlin reply parser is `links/_marlin_rx.py`; per-run
+> logging is `runlog.py`. Real hardware is untouched.
 
 ---
 

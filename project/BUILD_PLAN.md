@@ -9,7 +9,7 @@ chunks. Each chunk: build → `pytest` green → stage → commit.
 |--|--|
 | Owner | kl mithunvel |
 | Created | 2026-09-09 |
-| Status | C1–C5 done (91 tests). C6 next. |
+| Status | **C1–C6 done, 94 tests.** Software side of Phase 1 complete; hardware smoke test (manual) pending the applicator build. |
 | Overall plan | `project/PROJECT_PLAN.md` |
 | Architecture / rules | `.CLAUDE/CLAUDE.md` |
 
@@ -246,9 +246,29 @@ Deployment Notes).
 
 ---
 
-### C6 — Integration + full sanity pass
+### C6 — Integration + full sanity pass  ✅
 
 **Goal.** One end-to-end sim test, run logging, config validation, and a full review.
+
+**Done:** `magnet_embed/runlog.py` (`RunLog` — per-run `logs/<ts>-<name>.log`, wired
+into `Controller` via `log_dir=`; `main` + `main_sim --gui` opt in). `config._validate`
+extended with numeric-type and sentinel-token checks. `tests/test_integration_sim.py`
+(full run + abort, asserts final pos/temp + run-log contents) and `tests/test_runlog.py`.
+94 tests.
+
+**Bug found + fixed during C6:** `RunLog` used a non-reentrant `threading.Lock`;
+`close()` held it and called `write()` → deadlock (hung the whole suite). Switched
+to `RLock`. Good argument for the integration test existing.
+
+**Sanity checklist — run 2026-09-09, all pass:**
+- ✅ every `config.yaml` key is read in the package (checked by script); `printer.connect_settle_s` added for discoverability
+- ✅ every custom exception is raised somewhere (only `MagnetEmbedError`, the base, is not — by design)
+- ✅ no `G28` in any sequence path (`insert_magnet` has none; `G28` only in `printer_sim` interpreter and `app.home()`, which is idle-only); no `M0`/`M25` anywhere
+- ✅ `insert_magnet` restores nozzle target (or 0 on operator abort) on every failure branch — covered by tests
+- ✅ `SimPrinter`↔`SerialPrinter` and `SimDispenser`↔`SerialDispenser` have identical public APIs (symmetric-diff empty) and raise the same exception types
+- ✅ docs (`CLAUDE.md`, `PROJECT_PLAN.md`, this file, `HOW_IT_WORKS.md`, `TODO.md`, `README.md`) updated to match
+- ✅ `requirements.txt` pinned to majors; `requirements-dev.txt` for pytest; venv steps in `CLAUDE.md` correct
+- ✅ `pytest` 94/94 green; `py_compile` clean on every module; `main_sim` headless + `--gui` both run
 
 **Files:** `tests/test_integration_sim.py`, `magnet_embed/runlog.py` (writes
 `logs/run-<ts>.log`), `config` schema check in `config.py`, doc sync.

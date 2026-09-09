@@ -50,5 +50,11 @@ python magnet_embed\main.py         :: hardware — after the pre-hardware check
 
 ## Status
 
-Planning / scaffolding — no code yet. Next up: Phase 0 (mechanical proof) in
+**Phase 1 software complete** — the full control stack (streaming, sentinel
+detection, the park→dispense→press→shear→resume insert sequence, post-processor,
+Tkinter panel, real serial links) works against a simulated printer + dispenser,
+with 94 passing tests. It has **not** run on real hardware yet.
+
+Next: build the clip-on applicator + Arduino sketch, measure the tool offset, and
+run the manual hardware smoke test. See `project/BUILD_PLAN.md` and
 `project/PROJECT_PLAN.md`.

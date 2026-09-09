@@ -56,10 +56,37 @@ def _deep_merge(base: dict, over: dict) -> dict:
     return out
 
 
+#: keys whose value must be a number (int/float, not bool)
+_NUMERIC_KEYS: tuple[tuple[str, str], ...] = (
+    ("printer", "baud"), ("printer", "ack_timeout_s"),
+    ("dispenser", "baud"),
+    ("machine", "x_max"), ("machine", "y_max"), ("machine", "z_max"),
+    ("magnet_tool_offset", "x"), ("magnet_tool_offset", "y"), ("magnet_tool_offset", "z"),
+    ("park", "x"), ("park", "y"), ("park", "safe_z_lift_mm"),
+    ("travel", "feed"),
+    ("retract", "mm"), ("retract", "feed"), ("prime", "mm"), ("prime", "feed"),
+    ("press", "feed"), ("press", "dwell_ms"),
+    ("shear", "distance"), ("shear", "feed"),
+)
+
+
 def _validate(config: dict) -> None:
     for section, key in _REQUIRED_KEYS:
         if not isinstance(config.get(section), dict) or key not in config[section]:
             raise KeyError(f"config is missing required key: {section}.{key}")
+
+    for section, key in _NUMERIC_KEYS:
+        value = config[section][key]
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError(f"config {section}.{key} must be a number, got {value!r}")
+
+    token = config["gcode"]["sentinel_token"]
+    if not isinstance(token, str) or not token.startswith(";"):
+        raise ValueError(f"config gcode.sentinel_token must be a ';' comment, got {token!r}")
+
+    standby = config["temps"]["standby_nozzle_c"]
+    if standby is not None and (isinstance(standby, bool) or not isinstance(standby, (int, float))):
+        raise ValueError(f"config temps.standby_nozzle_c must be a number or null, got {standby!r}")
 
 
 def load_config(path: str | Path | None = None) -> dict[str, Any]:

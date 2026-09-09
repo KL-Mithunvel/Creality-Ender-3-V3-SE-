@@ -188,10 +188,15 @@ Everything lives under `magnet_embed/`.
 | `sequences/insert_magnet.py` | The step-by-step sequence from section 6. |
 | `main_sim.py` | The command you run to see it all work in simulation: `python -m magnet_embed.main_sim tests/data/sample.gcode`. |
 
-Not built yet: `gcode/postprocess.py` (C3, adds the sentinel to a sliced file),
-`ui/panel.py` (C4, the Tkinter window), `links/printer_serial.py` +
-`links/dispenser_serial.py` (C5, the real USB connections), `main.py` (C5,
-the real-hardware entry point).
+Also built: `gcode/postprocess.py` (adds the sentinel to a sliced file, CLI),
+`ui/panel.py` + `app.py` (the Tkinter window + its threading mediator),
+`links/printer_serial.py` + `links/dispenser_serial.py` + `links/_marlin_rx.py`
+(the real USB connections and the Marlin reply parser), `main.py` (the
+real-hardware entry point), `runlog.py` (per-run transcript files).
+
+**Not built:** the physical applicator and the Arduino sketch (`dispenser_fw/`).
+The software has never touched real hardware yet — the first bench session is
+expected to be debugging.
 
 ---
 
@@ -211,10 +216,12 @@ insert sequence, the runner, and (later) the UI can be run and tested end-to-end
 with nothing plugged in. When we do plug in the real printer (chunk C5), only the
 two `*_serial.py` files are new — everything above them is already proven.
 
-There are **44 automated tests** (`pytest`) covering the sentinel parser, the
-simulated printer's G-code handling, the streaming runner (including pause/cancel),
-and every branch of the insert sequence (happy path, out-of-range, retry, abort,
-dispenser failure, mode restore).
+There are **94 automated tests** (`pytest`) covering: the sentinel parser and
+post-processor (Cura + PrusaSlicer), the simulated printer's G-code handling, the
+streaming runner (pause/cancel), every branch of the insert sequence (happy path,
+out-of-range, retry, abort, dispenser failure, mode restore), the threaded
+UI-mediator, and the real serial links + Marlin reply parser (driven by a fake
+serial port).
 
 ---
 

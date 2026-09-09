@@ -73,7 +73,9 @@ def _run_gui(args, config) -> int:
     from .app import Controller
     from .ui.panel import run_gui
 
-    controller = Controller(SimPrinter(command_delay=0.03), SimDispenser(), config)
+    controller = Controller(
+        SimPrinter(command_delay=0.03), SimDispenser(), config, log_dir="logs"
+    )
     controller.connect()
     if args.gcode:
         controller.load_gcode(args.gcode)
