@@ -47,6 +47,10 @@ class SentinelNotFound(MagnetEmbedError):
     """`require_sentinel` was set but EOF was reached without seeing one."""
 
 
+class PostprocessError(MagnetEmbedError):
+    """The G-code post-processor could not place the sentinel (no markers, bad target)."""
+
+
 # --- dispenser ---------------------------------------------------------
 
 class DispenserError(MagnetEmbedError):

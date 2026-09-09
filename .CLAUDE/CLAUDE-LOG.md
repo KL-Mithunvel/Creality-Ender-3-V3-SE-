@@ -145,3 +145,17 @@
   `~$` lock file into commit c5c647e. Lock file removed from tracking here
   (`git rm --cached`), now gitignored. The `.docx` is kept (wanted project material).
 
+## 2026-09-09 — C3: G-code post-processor
+
+- `gcode/postprocess.py` + CLI — injects `;MAGNET_INSERT X Y Z S<dir>` at a chosen
+  layer or Z height. `_detect_layers` understands Cura `;LAYER:<n>` (layer height
+  from the first Z move) and PrusaSlicer `;LAYER_CHANGE` + `;Z:`; the sentinel is
+  placed right after the marker block so it doesn't split the Prusa pair.
+- `PostprocessError` (new) for: no markers, layer not found, height above the top.
+- `fmt_number` moved from `insert_magnet` into `gcode/util.py` (shared).
+- Fixtures `tests/data/cura_sample.gcode` + `prusa_sample.gcode`; `test_postprocess.py`
+  (12 tests incl. CLI + round-trip through `parse_sentinel`). 56 tests total.
+- UI defaults decided for C4 (told the user, open to veto): jog steps 0.1/1/10 mm;
+  Success/Retry/Abort as a modal dialog; read-only log pane, no raw G-code entry.
+- Next: C4 — Tkinter panel + threading mediator.
+

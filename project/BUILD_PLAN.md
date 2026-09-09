@@ -9,7 +9,7 @@ chunks. Each chunk: build → `pytest` green → stage → commit.
 |--|--|
 | Owner | kl mithunvel |
 | Created | 2026-09-09 |
-| Status | C1–C2 done (44 tests). C3 next. |
+| Status | C1–C3 done (56 tests). C4 next. |
 | Overall plan | `project/PROJECT_PLAN.md` |
 | Architecture / rules | `.CLAUDE/CLAUDE.md` |
 
@@ -157,10 +157,17 @@ sequence with a `--confirm` canned answer.
 
 ---
 
-### C3 — G-code post-processor
+### C3 — G-code post-processor  ✅
 
 **Goal.** `gcode/postprocess.py` + CLI — inject `;MAGNET_INSERT X Y Z S<dir>` at a
 layer or Z height.
+
+**Done:** `gcode/postprocess.py` + CLI; `_detect_layers` handles Cura `;LAYER:<n>`
+(height from the first Z move) and PrusaSlicer `;LAYER_CHANGE`+`;Z:`; sentinel goes
+right after the marker block; `PostprocessError` for no-markers / missing layer /
+height-above-top. `fmt_number` moved to `gcode/util.py` (shared with
+`insert_magnet`). Fixtures `tests/data/cura_sample.gcode` + `prusa_sample.gcode`;
+12 new tests (56 total).
 
 **Files:** `gcode/postprocess.py`, `tests/data/cura_sample.gcode`,
 `tests/data/prusa_sample.gcode`, `test_postprocess.py`.

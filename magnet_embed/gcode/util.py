@@ -22,3 +22,9 @@ def parse_words(line: str) -> dict[str, float]:
         m.group(1).upper(): float(m.group(2))
         for m in _WORD_RE.finditer(strip_comment(line))
     }
+
+
+def fmt_number(value: float) -> str:
+    """Format a float for G-code / a sentinel: 3 dp, trailing zeros trimmed, never empty."""
+    text = f"{value:.3f}".rstrip("0").rstrip(".")
+    return text if text not in ("", "-", "-0") else "0"

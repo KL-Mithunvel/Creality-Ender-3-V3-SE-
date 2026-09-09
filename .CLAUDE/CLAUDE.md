@@ -58,9 +58,10 @@ involvement is acceptable at this stage.
 
 ## Running the System
 
-> Build status: **C1–C2 done** (`project/BUILD_PLAN.md`) — the sim pipeline below runs
-> the full insert sequence against `SimPrinter` + `SimDispenser`. `postprocess` (C3),
-> the Tkinter UI (C4), and the real serial links (C5) are not built yet. venv first, always.
+> Build status: **C1–C3 done** (`project/BUILD_PLAN.md`) — the sim pipeline below runs
+> the full insert sequence against `SimPrinter` + `SimDispenser`, and `postprocess`
+> injects the sentinel. The Tkinter UI (C4) and the real serial links (C5) are not
+> built yet. venv first, always.
 
 ```bat
 :: one-time setup (Windows)
@@ -175,12 +176,12 @@ hardware attached.
 
 ## Key Modules
 
-> Built (C1–C2): `config`, `state`, `exceptions`, `links/base` + `printer_sim` +
-> `dispenser_sim`, `gcode/util` + `gcode/sentinel` + `gcode/runner`,
-> `sequences/insert_magnet` (full state machine), `main_sim`.
-> Not built: `postprocess` (C3), `ui/panel` (C4), `printer_serial` /
-> `dispenser_serial` / `main` (C5). Actual layout: comment/word helpers are in
-> `gcode/util.py`; both ABCs are in `links/base.py`.
+> Built (C1–C3): `config`, `state`, `exceptions`, `links/base` + `printer_sim` +
+> `dispenser_sim`, `gcode/util` + `gcode/sentinel` + `gcode/runner` +
+> `gcode/postprocess`, `sequences/insert_magnet` (full state machine), `main_sim`.
+> Not built: `ui/panel` (C4), `printer_serial` / `dispenser_serial` / `main` (C5).
+> Actual layout: text/number helpers (`strip_comment`, `parse_words`, `fmt_number`)
+> are in `gcode/util.py`; both ABCs are in `links/base.py`.
 
 ### `links/printer_link.py` — `PrinterLink` (abstract)
 - `connect() -> None` — open the port, wait for the firmware banner. Raises `PrinterConnectionError`.

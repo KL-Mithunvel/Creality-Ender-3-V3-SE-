@@ -28,6 +28,8 @@ criteria, risks). Architecture and rules: `.CLAUDE/CLAUDE.md`. Keep all three in
       parser, `GcodeRunner`, headless `main_sim`; 33 tests pass.
 - [x] **C2** — `sequences/insert_magnet.py` full SAVE…RESUME state machine (M400-gated,
       envelope check, retry/abort, temp + position + mode restore); 44 tests pass.
+- [x] **C3** — `gcode/postprocess.py` + CLI (Cura + PrusaSlicer marker parsing,
+      sentinel injection by layer or Z height); 56 tests pass.
 
 ## Not Started
 
@@ -42,7 +44,7 @@ criteria, risks). Architecture and rules: `.CLAUDE/CLAUDE.md`. Keep all three in
 Chunked in `project/BUILD_PLAN.md` — one commit per chunk.
 - [x] C1 Skeleton: config, `SimPrinter`, sentinel parser, `GcodeRunner`, headless `main_sim` + tests (33 pass)
 - [x] C2 `sequences/insert_magnet.py` — SAVE…RESUME state machine against the sim + tests (44 pass)
-- [ ] C3 `gcode/postprocess.py` — `;MAGNET_INSERT X Y Z S<dir>` injection + CLI + tests
+- [x] C3 `gcode/postprocess.py` — `;MAGNET_INSERT X Y Z S<dir>` injection + CLI + tests (56 pass)
 - [ ] C4 Tkinter panel + threading mediator (Success / Retry / Abort modal)
 - [ ] C5 Real serial: `printer_serial` + `dispenser_serial` + Marlin rx parser + tests
 - [ ] C6 Integration sim test, run logging, full sanity pass

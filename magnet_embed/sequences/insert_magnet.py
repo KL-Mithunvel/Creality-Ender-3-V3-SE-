@@ -28,6 +28,7 @@ import logging
 from collections.abc import Callable
 
 from ..exceptions import OutOfEnvelopeError, SequenceAborted
+from ..gcode.util import fmt_number as _fmt
 from ..links.base import DispenserLink, PrinterLink
 from ..state import MagnetInsert, PrinterState
 
@@ -43,12 +44,6 @@ _SHEAR_VEC: dict[str, tuple[float, float]] = {
     "+Y": (0.0, 1.0),
     "-Y": (0.0, -1.0),
 }
-
-
-def _fmt(value: float) -> str:
-    """Format a number for G-code: trim trailing zeros, never empty."""
-    text = f"{value:.3f}".rstrip("0").rstrip(".")
-    return text if text not in ("", "-", "-0") else "0"
 
 
 def _send(printer: PrinterLink, *lines: str) -> None:
