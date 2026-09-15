@@ -8,7 +8,7 @@ widgets. All Tkinter work stays on the main thread.
 from __future__ import annotations
 
 import tkinter as tk
-from tkinter import filedialog, scrolledtext, ttk
+from tkinter import filedialog, messagebox, scrolledtext, ttk
 
 from ..app import Controller
 from ..state import PrinterState
@@ -82,6 +82,8 @@ class ControlPanel(ttk.Frame):
                 command=lambda a=axis, s=sign: self.c.jog(a, s * self.step.get()),
             ).grid(row=1 + i // 2, column=i % 2, padx=2, pady=1)
         ttk.Button(jog, text="Home", command=self.c.home).grid(row=1, column=2, padx=8)
+        self.btn_level = ttk.Button(jog, text="Level Bed…", command=self._level_bed)
+        self.btn_level.grid(row=1, column=3, columnspan=2, padx=8, sticky="w")
         row += 1
 
         temp = ttk.LabelFrame(self, text="Temperature  (works during a print too)", padding=6)
@@ -153,6 +155,17 @@ class ControlPanel(ttk.Frame):
 
     def _filament(self, sign: int) -> None:
         self.c.extrude(sign * _to_float(self.fil_mm, 5.0), _to_float(self.fil_feed, 300.0))
+
+    def _level_bed(self) -> None:
+        if messagebox.askyesno(
+            "Level bed?",
+            "Homes all axes, then probes a fresh bed mesh, enables it, and "
+            "saves it to EEPROM. Moves the toolhead over the whole bed and "
+            "can take a couple of minutes - the panel will be unresponsive "
+            "until it finishes. Continue?",
+            parent=self,
+        ):
+            self.c.level_bed()
 
     def _plan_insert(self) -> None:
         if self.c.gcode_path is None or self.c.running:
@@ -240,6 +253,7 @@ class ControlPanel(ttk.Frame):
         self.cmd_entry.configure(state=idle_state)
         self.btn_extrude.configure(state=idle_state)
         self.btn_retract.configure(state=idle_state)
+        self.btn_level.configure(state=idle_state)
         self.btn_plan.configure(
             state=("disabled" if running or self.c.gcode_path is None else "normal")
         )

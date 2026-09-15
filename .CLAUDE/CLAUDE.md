@@ -59,7 +59,8 @@ involvement is acceptable at this stage.
 
 ## Running the System
 
-> Build status: **C1–C8 + Phase 1.6 (C13–C19) done, plus mid-print temp control — 185 tests** (`project/BUILD_PLAN.md`).
+> Build status: **C1–C8 + Phase 1.6 (C13–C19) done, plus mid-print temp control
+> and a Level Bed button — 189 tests** (`project/BUILD_PLAN.md`).
 > One root `python main.py` (mode by flag), `gcode/toolpath.py`, shared
 > `sequences/geometry.py`, a matplotlib toolpath + insert-motion preview
 > (`main.py --preview`), a "Plan magnet insert…" dialog that saves
@@ -289,11 +290,15 @@ hardware attached.
 - `dispenser_optional=True` (used by `--hardware`): if `dispenser.connect()` raises a
   `DispenserError`, `connect()` logs it, drops `self.dispenser` to `None`, and does
   not raise — the run continues printer-only. Default `False` keeps it strict.
-- Actions: `connect`, `load_gcode`, `jog`, `home`, `send_command` (raw G-code line),
-  `extrude` (mm+feed, negative = retract) — all no-ops while a run is active, and
-  all now surface a `PrinterError`/`AckTimeout`/`ResendRequested` as an `error`
-  event instead of raising — plus `start_run`, `pause`, `resume`, `cancel`,
-  `answer_prompt`.
+- Actions: `connect`, `load_gcode`, `jog`, `home`, `level_bed` (`G28`→`G29`→
+  `M420 S1`→`M500`), `send_command` (raw G-code line), `extrude` (mm+feed,
+  negative = retract) — all no-ops while a run is active, and all now surface a
+  `PrinterError`/`AckTimeout`/`ResendRequested` as an `error` event instead of
+  raising — plus `start_run`, `pause`, `resume`, `cancel`, `answer_prompt`.
+  `level_bed` blocks the caller for the whole probe (can be a couple of
+  minutes) — same accepted trade-off as `home`, just longer; `wait_ok` already
+  tolerates it via Marlin's `busy:` keepalive (`DEFAULT_KEEPALIVE_INTERVAL 2`
+  in the stock firmware, well under `ack_timeout_s`).
 - `set_temp(which, value)` and `refresh_state()` are the exception to "idle
   only": neither touches motion (`M104`/`M140`/`M105`/`M400`/`M114`), so both
   are allowed **during a normal print** (locked against the streaming loop —
@@ -308,7 +313,8 @@ hardware attached.
 
 ### `ui/panel.py` — `ControlPanel` + `run_gui(controller)`
 - Thin Tkinter view over a `Controller`. Connect, load G-code, run/pause/resume/cancel,
-  a run-progress bar, jog (0.1/1/10 mm) + home + raw G-code entry + extrude/retract
+  a run-progress bar, jog (0.1/1/10 mm) + home + "Level Bed…" (confirm dialog first
+  — it moves the toolhead over the whole bed) + raw G-code entry + extrude/retract
   **idle only**, "Plan magnet insert…", read-only log, live position/temp line.
   Auto-refreshes state every `ui.idle_poll_s` while connected + idle.
   `_show_prompt` opens a modal **Success / Retry / Abort** (or **Ready / Abort**)
@@ -497,6 +503,18 @@ parks, magnet dispensed, controlled press + lateral shear run, print resumes and
   conservative guesses**, not the Ender-3 V3 SE's real firmware `MAXTEMP`/bed
   ceiling — they only gate the host-side `set_temp` UI, they are not read from
   the printer. Raise them in `config.local.yaml` if your hotend/bed is rated higher.
+- **First-layer quality issue, root-caused 2026-09-15 (not a bug in this repo):**
+  the stock Ender-3 V3 SE firmware ships with `RESTORE_LEVELING_AFTER_G28`
+  disabled ([`CrealityOfficial/Ender-3V3-SE` `Configuration.h`
+  line 1521](https://github.com/CrealityOfficial/Ender-3V3-SE/blob/main/Marlin/Configuration.h)),
+  so any `G28` turns bed-mesh compensation back off; the Creality Print slicer
+  profile used for `Cube_PETG_7m59s.gcode` never sends `M420 S1` to re-enable
+  it, so that print ran with an uncorrected mesh the whole time. The new
+  **Level Bed…** panel button (`Controller.level_bed`) probes + enables + saves
+  a mesh on demand, but that enabled state does **not** survive the print's own
+  `G28` unless something re-sends `M420 S1` right after it — either add that
+  line to the slicer's start G-code, or (not built) have `GcodeRunner`
+  auto-resend `M420 S1` after any `G28` it streams.
 
 No rule violations recorded. Add any here (file + line) as they appear; do not omit.
 

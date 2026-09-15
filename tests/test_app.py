@@ -261,6 +261,31 @@ def _boom(_line, timeout_s=None):
     raise PrinterError("boom")
 
 
+def test_level_bed_sends_probe_enable_and_save(config):
+    ctl = _ctl(config)
+    ctl.level_bed()
+    assert ctl.printer.sent[-4:] == ["G28", "G29", "M420 S1", "M500"]
+
+
+def test_level_bed_ignored_while_running(config):
+    ctl = _ctl(config, delay=0.03)
+    ctl.load_gcode(SAMPLE)
+    ctl.start_run()
+    assert _wait(lambda: ctl.running)
+    before = list(ctl.printer.sent)
+    ctl.level_bed()
+    assert ctl.printer.sent == before
+    assert any(k == "log" and "ignored" in str(p) for k, p in ctl.poll_events())
+    _pump_until(ctl, "done", answer="success")
+
+
+def test_level_bed_surfaces_printer_error(config):
+    ctl = _ctl(config)
+    ctl.printer.command = _boom
+    ctl.level_bed()
+    assert any(k == "error" for k, _ in ctl.poll_events())
+
+
 def test_jog_surfaces_printer_error(config):
     ctl = _ctl(config)
     ctl.printer.command = _boom

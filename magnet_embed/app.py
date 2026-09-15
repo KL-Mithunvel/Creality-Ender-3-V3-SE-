@@ -225,6 +225,34 @@ class Controller:
             return
         self._emit_state()
 
+    def level_bed(self) -> None:
+        """Home, probe a fresh bed mesh (`G29`), enable it (`M420 S1`), and save
+        it to EEPROM (`M500`). Idle only - moves the toolhead over the whole bed
+        and can take a couple of minutes (blocks like `home()` does; `wait_ok`
+        already tolerates a long-running command via Marlin's `busy:` keepalive).
+
+        Exists because the V3 SE's stock firmware ships with
+        `RESTORE_LEVELING_AFTER_G28` disabled: `G28` turns mesh compensation
+        back off every time, and this printer's Creality Print start G-code
+        never sends `M420 S1` to re-enable it - see `.CLAUDE/CLAUDE.md` ->
+        Known Technical Debt. Running this before a print gets you a fresh,
+        enabled, saved mesh; it does NOT survive the print's own `G28` unless
+        the slicer's start G-code (or `GcodeRunner`) re-sends `M420 S1` after it.
+        """
+        if self.running:
+            self._emit("log", "bed leveling ignored - a run is active")
+            return
+        try:
+            self.printer.command("G28")
+            self.printer.command("G29")
+            self.printer.command("M420 S1")
+            self.printer.command("M500")
+        except (PrinterError, AckTimeout, ResendRequested) as exc:
+            self._emit("error", f"{type(exc).__name__}: {exc}")
+            return
+        self._emit("log", "bed leveling complete: probed, enabled, saved to EEPROM")
+        self._emit_state()
+
     def start_run(self) -> None:
         if self.running:
             return
