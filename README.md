@@ -55,7 +55,7 @@ Everything below assumes `.venv` is active (`.venv\Scripts\activate`).
 **Automated tests — no hardware needed:**
 
 ```bat
-python -m pytest                          :: full suite (218 tests)
+python -m pytest                          :: full suite (223 tests)
 python -m py_compile main.py magnet_embed\*.py magnet_embed\ui\*.py magnet_embed\gcode\*.py magnet_embed\sequences\*.py magnet_embed\links\*.py magnet_embed\viz\*.py
 ```
 
@@ -95,7 +95,7 @@ the first `--printer` / `--hardware` run on a given machine.
 | `.CLAUDE/CLAUDE.md` | Full project brief — architecture, modules, conventions, rules |
 | `project/HOW_IT_WORKS.md` | Plain-language walkthrough of the whole system (start here if new) |
 | `project/PROJECT_PLAN.md` | Multi-phase plan — goals, steps, files, success criteria, risks, checklist |
-| `project/BUILD_PLAN.md` | Software build broken into commit-sized chunks (C1–C8, Phase 1.6 C13–C19, Phase 1.7 C20, Phase 1.8 C21) + protocol notes |
+| `project/BUILD_PLAN.md` | Software build broken into commit-sized chunks (C1–C8, Phase 1.6 C13–C19, Phase 1.7 C20, Phase 1.8 C21, Phase 1.9 C22) + protocol notes |
 | `project/RESEARCH.md` | Prior art & similar projects survey (OctoPNP, in-situ-placement papers, host-control patterns) + how each informs the design |
 | `docs/INVENTION_DISCLOSURE_DRAFT.md` | Working draft of the patent disclosure form (for inventor + attorney review) |
 | `TODO.md` | Task tracker (mirrors the plan checklists) |
@@ -103,23 +103,26 @@ the first `--printer` / `--hardware` run on a given machine.
 
 ## Status
 
-**Phase 1 + Phase 1.6 + Phase 1.7 + Phase 1.8 software complete (218 tests).**
-One `python main.py` (mode by flag) drives the whole workflow against a
-simulated printer + dispenser: import a slice → visualise the toolpath →
-simulate the magnet-insert motion → place the sentinel and save
+**Phase 1 + Phase 1.6 + Phase 1.7 + Phase 1.8 + Phase 1.9 software complete
+(223 tests).** One `python main.py` (mode by flag) drives the whole workflow
+against a simulated printer + dispenser: import a slice → visualise the
+toolpath → simulate the magnet-insert motion → place the sentinel and save
 `*.magnet.gcode` → stream it → park / dispense / press / shear /
-Success·Retry·Abort / resume. The panel has jog/home, raw G-code,
-extrude/retract, idle polling, a run-progress bar, an embedded **live-print
-view** (current layer + a nozzle-position marker + the current G-code step's
-text, driven from line progress against the parsed toolpath — no extra
-printer traffic), and a guided **"Z Calibrate…"** paper-test Z-offset dialog
-(config is the trusted offset, `M851`+`M500` on save — **not yet bench-tested
-on real hardware**). Nozzle/bed **temperature can be changed even during a
-print** (locked against the streaming loop, blocked only while the
-magnet-insert sequence owns the heaters), with the allowed range and a live
-current-temp readout shown next to each entry — confirmed already working,
-polled continuously during a run, not just when idle. The **printer serial
-link is verified on real hardware** (COM3).
+Success·Retry·Abort / resume. The panel is scrollable (nothing clips on a
+short screen), shows what it's actually connected to (`"simulator"` /
+`"printer COM3"`), and has jog/home, raw G-code, extrude/retract, idle
+polling, a run-progress bar, an embedded **live-print view** with a **2D/3D
+toggle** (current layer or isometric whole-part view + a nozzle-position
+marker + the current G-code step's text, redrawn ~6–7×/s for smooth motion),
+and a guided **"Z Calibrate…"** paper-test Z-offset dialog (config is the
+trusted offset, `M851`+`M500` on save — **not yet bench-tested on real
+hardware**). "Plan magnet insert…" now shows an embedded live preview of the
+planned insert motion as you edit the pocket coordinates. Nozzle/bed
+**temperature can be changed even during a print** (locked against the
+streaming loop, blocked only while the magnet-insert sequence owns the
+heaters), with the allowed range and a live current-temp readout shown next
+to each entry. The **printer serial link is verified on real hardware**
+(COM3).
 
 Next for the magnet flow: build the clip-on applicator + Arduino sketch, measure
 the tool offset, run the manual hardware smoke test — and bench-test the new

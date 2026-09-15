@@ -60,14 +60,17 @@ involvement is acceptable at this stage.
 ## Running the System
 
 > Build status: **C1–C8 + Phase 1.6 (C13–C19) + Phase 1.7 (C20) + Phase 1.8
-> (C21) done, plus mid-print temp control, a Level Bed button, a run-report
-> summary in the log, in-panel config editing, an embedded live-print view,
-> and a guided Z-offset calibration dialog — 218 tests** (`project/BUILD_PLAN.md`).
+> (C21) + Phase 1.9 (C22) done, plus mid-print temp control, a Level Bed
+> button, a run-report summary in the log, in-panel config editing, an
+> embedded live-print view with a 2D/3D toggle, a guided Z-offset calibration
+> dialog, and a scrollable panel that shows what it's actually connected to —
+> 223 tests** (`project/BUILD_PLAN.md`).
 > One root `python main.py` (mode by flag), `gcode/toolpath.py`, shared
 > `sequences/geometry.py`, a matplotlib toolpath + insert-motion preview
 > (`main.py --preview`), a "Plan magnet insert…" dialog that saves
-> `*.magnet.gcode`, the panel polish (raw G-code, idle poll, extrude/retract,
-> progress bar), and a live-print view in the main panel (current layer + a
+> `*.magnet.gcode` and embeds a live preview of the insert motion, the panel
+> polish (raw G-code, idle poll, extrude/retract, progress bar), and a
+> live-print view in the main panel (current layer or isometric 3D + a
 > nozzle marker driven from G-code line progress, no extra printer traffic).
 > `GcodeRunner` skips firmware-pause codes (`M0`/`M1`/`M25`/`M600`/`M601`).
 > Printer serial link verified on real hardware (COM3). What remains for the magnet
@@ -136,14 +139,14 @@ back-compat wrappers that call `entry` with a fixed mode.
 | `magnet_embed/gcode/runner.py` | `GcodeRunner` — streams lines, waits for `ok`, detects + parses the sentinel, drops firmware-pause codes (`M0`/`M1`/`M25`/`M600`/`M601`), handles pause / resume / cancel. |
 | `magnet_embed/gcode/postprocess.py` | Inserts the `;MAGNET_INSERT X Y Z S<dir>` sentinel comment at a chosen layer / height. |
 | `magnet_embed/gcode/toolpath.py` | `parse_toolpath(path) -> Toolpath` — a slice as ordered `Segment`s (travel vs extrude, each carrying a 1-based `line_no`), a layer→Z table (slicer markers, else Z-derived), bounding box, distances, rough time. `progress_position(current_line)` / `progress_layer(current_line)` bisect the parsed path to the nozzle position/layer implied by how far `GcodeRunner` has streamed — no extra printer traffic. Feeds the visualisation, the plan dialog, and the panel's live-print view. |
-| `magnet_embed/viz/toolpath_fig.py` | Pure preview helpers (`nozzle_waypoints`, `pole_waypoints`, `sample_polyline`, `state_at_z`) + matplotlib `draw_*` functions (layer X–Y, side X–Z, 3D path, phase-coloured insert overlay, `draw_live_layer`/`update_live_marker` for the panel's live view). No GUI backend. |
+| `magnet_embed/viz/toolpath_fig.py` | Pure preview helpers (`nozzle_waypoints`, `pole_waypoints`, `sample_polyline`, `state_at_z`) + matplotlib `draw_*` functions (layer X–Y, side X–Z, 3D path, phase-coloured insert overlay, `draw_live_layer`/`update_live_marker` + `draw_live_3d`/`update_live_marker_3d` for the panel's live view 2D/3D toggle). No GUI backend. |
 | `magnet_embed/viz/preview.py` | `PreviewWindow` (Tk `Toplevel`, matplotlib `FigureCanvasTkAgg`) — layer slider, play/scrub the nozzle + pole tip along `plan_insert_moves`, envelope violations flagged, "Open 3D view". `python main.py --preview FILE`. |
 | `magnet_embed/sequences/geometry.py` | `compute_targets` / `plan_insert_moves` / `check_envelope` / `pole_point` — the one place the insert-motion targets are computed. `insert_magnet` executes them; the preview + plan dialog draw and envelope-check the same numbers. |
 | `magnet_embed/sequences/insert_magnet.py` | The `SAVE → PARK → DISPENSE → APPROACH → PRESS → SHEAR → LIFT → ASK → RESUME` state machine. Targets come from `geometry.compute_targets`. |
-| `magnet_embed/app.py` | `Controller` — headless UI↔worker mediator (threads, queues, prompt blocking); optional `log_dir` writes a per-run transcript. `load_gcode()` caches a parsed `toolpath` + raw `gcode_lines` (best-effort — a parse failure logs and leaves them empty rather than blocking the load); `progress_point`/`current_line_text` derive the live nozzle position + current G-code line from them. `start_z_calibration()`/`nudge_z()`/`save_z_offset()` drive the Z Calibrate dialog (idle-only). |
+| `magnet_embed/app.py` | `Controller` — headless UI↔worker mediator (threads, queues, prompt blocking); optional `log_dir` writes a per-run transcript. `load_gcode()` caches a parsed `toolpath` + raw `gcode_lines` (best-effort — a parse failure logs and leaves them empty rather than blocking the load); `progress_point`/`current_line_text` derive the live nozzle position + current G-code line from them. `start_z_calibration()`/`nudge_z()`/`save_z_offset()` drive the Z Calibrate dialog (idle-only). `link_summary` → `"simulator"` / `"printer COM3"` / `"... + dispenser COM4"`, from whether the link objects have a `.port` (real) or not (sim). |
 | `magnet_embed/runlog.py` | `RunLog` — one `logs/<ts>-<name>.log` per streamed job, a timestamped line per event, plus a human-readable `=== SUMMARY ===` block appended on `close()` (duration, lines sent/total, sentinels seen, any errors, final position + temps). `summary_text` is also echoed to the panel log right after a run finishes. |
-| `magnet_embed/ui/panel.py` | Tkinter panel — thin view over `Controller`; jog/home/Level-Bed/Z-Calibrate + raw G-code entry idle-only, "Plan magnet insert…", "Settings…", and "Z Calibrate…" dialogs, modal Success/Retry/Abort prompt, live log, an embedded live-print view (current layer + nozzle marker + current-step G-code text). |
-| `magnet_embed/ui/plan_dialog.py` | "Plan magnet insert" dialog + pure helpers — set pocket X/Y, seat Z, shear, target layer/Z; envelope-check; Preview; **Save `<stem>.magnet.gcode`** and load it. |
+| `magnet_embed/ui/panel.py` | Tkinter panel — thin view over `Controller`; the whole thing lives in a scrollable canvas so nothing clips on a short screen; shows a mode/port label (`Controller.link_summary`) next to the connection status; jog/home/Level-Bed/Z-Calibrate + raw G-code entry idle-only, "Plan magnet insert…", "Settings…", and "Z Calibrate…" dialogs, modal Success/Retry/Abort prompt, live log, an embedded live-print view with a 2D/3D toggle (current layer, or isometric whole-part, + nozzle marker + current-step G-code text). |
+| `magnet_embed/ui/plan_dialog.py` | "Plan magnet insert" dialog + pure helpers — set pocket X/Y, seat Z, shear, target layer/Z; envelope-check; an embedded live preview of the planned insert motion (redraws on every keystroke, even out-of-envelope, so the operator can see why); "Animate…" opens the separate play/scrub popup (C16); **Save `<stem>.magnet.gcode`** and load it. |
 | `magnet_embed/ui/settings_dialog.py` | "Settings" dialog — edit `printer.port`/`dispenser.port`/`magnet_tool_offset` from the panel, writes `config.local.yaml`. |
 | `magnet_embed/ui/zcal_dialog.py` | "Z Calibrate…" dialog — guided paper-test Z-offset workflow: home + travel to `zcal.{x,y,start_z}`, fine nudge buttons, Save applies the accumulated nudge to the trusted `config.zcal.probe_z_offset` (`Controller.save_z_offset`), never a value read back from the printer. **Untested on real hardware** — see Known Technical Debt. |
 | `dispenser_fw/` | Arduino Uno sketch for the magazine servo (Phase 2). |
@@ -274,8 +277,18 @@ hardware attached.
 ### `ui/plan_dialog.py`
 - `PlanInsertDialog` + pure helpers `resolve_target_z`, `magnet_output_path`,
   `save_magnet_gcode`, `envelope_report`. Enter pocket X/Y, seat Z, shear, and a
-  target (layer index or Z height); live envelope check; **Preview** opens the C16
-  window; **Save** writes `<stem>.magnet.gcode` and loads it as the active file.
+  target (layer index or Z height); live envelope check; **Save** writes
+  `<stem>.magnet.gcode` and loads it as the active file.
+- **Embedded insert-motion preview (C22).** `_redraw_embedded_preview`, called
+  from `_check()` on every keystroke — an X-Y + X-Z pair (`viz.toolpath_fig
+  .draw_layer_xy`/`draw_side_xz`/`draw_insert_overlay`) showing the
+  phase-coloured planned nozzle path, the dashed pole path, and the pocket
+  marker, built from the same `sequences.geometry.plan_insert_moves` output
+  `insert_magnet` actually drives (via `plan_for`) — can't drift from the real
+  run. Drawn even when out-of-envelope so the operator can see why. **"Animate…"**
+  (renamed from "Preview" in C22) still opens the separate C16 popup for the
+  full play/scrub/3D experience — the embed is a live static complement, not a
+  replacement.
 
 ### `sequences/geometry.py`
 - `compute_targets(mi, config, saved) -> Targets` (`approach_xy`, `press_z`,
@@ -333,7 +346,8 @@ hardware attached.
   → the nozzle tip's `(x, y, z)` implied by that line progress against the cached
   `toolpath` (`None` if no toolpath), `current_line_text` → the raw source line at
   that progress (`""` if none), `toolpath`/`gcode_lines` (cached by `load_gcode()`,
-  best-effort).
+  best-effort), `link_summary` → `"simulator"` / `"printer COM3"` / `"printer
+  COM3 + dispenser COM4"` (whether `printer`/`dispenser` have a real `.port`).
 - Event kinds: `log`, `state` (a `PrinterState`), `prompt` (`"dispense"`/`"confirm"`),
   `done`, `error`.
 
@@ -346,20 +360,44 @@ hardware attached.
   every `ui.idle_poll_s` while connected + idle. `_show_prompt` opens a modal
   **Success / Retry / Abort** (or **Ready / Abort**) dialog that calls
   `controller.answer_prompt`. Drains `poll_events()` every 120 ms.
-- **Live-print view** (`_sync_live_view`, C20) — a small `FigureCanvasTkAgg` embedded
-  directly in the panel (not a separate window) showing the active layer's toolpath
-  plus a marker at `controller.progress_point`, and a label under the canvas showing
-  `controller.current_line_text` — "what the current step looks like" as text, not
-  just a dot on the plot. Redraws the layer only when the active layer changes;
-  otherwise just moves the marker (`viz.toolpath_fig.update_live_marker`) — cheap
-  enough to run on a timer. Throttled off the existing 120 ms tick via
-  `ui.live_view_poll_s` (default 1.0 s; `0` disables), same pattern as `ui.idle_poll_s`.
-  Static (current layer, no marker) once a file loads; the marker tracks line progress
-  once a run starts and freezes at the final position when it ends. No extra printer
-  traffic — position comes from `Toolpath.progress_position`, not a polled `M114`.
+- **Scrollable (C22).** `_build_scroll_container` wraps everything in a `Canvas`
+  + `Scrollbar` (content built onto `self.body`, not `self` directly) — the
+  panel's natural content height (~1100+ px with the live view, calibration
+  captions, filament/send-G-code/log rows) regularly exceeds a laptop screen;
+  it now scrolls instead of clipping the bottom rows off-window. Mouse-wheel
+  binding is scoped to `<Enter>`/`<Leave>` on the canvas so it doesn't hijack
+  scrolling inside a dialog's own widgets. `run_gui()` sets a fixed starting
+  size (640×800, `minsize` 480×360, resizable) instead of sizing to content.
+- **Mode/port label (C22).** `self.target_lbl` next to the connection status
+  shows `controller.link_summary` (`"simulator"` / `"printer COM3"` / …) so
+  "connected" is never ambiguous about *what* — the status text itself was
+  already correct (`not connected` until `Controller.connect()` actually
+  succeeds), the real gap was no visibility into which target it applied to.
+- **Live-print view** (`_sync_live_view`, C20/C22) — a small `FigureCanvasTkAgg`
+  embedded directly in the panel (not a separate window) showing the active
+  layer's toolpath (or, in 3D mode, the whole part isometrically) plus a
+  marker at `controller.progress_point`, and a label under the canvas showing
+  `controller.current_line_text` — "what the current step looks like" as text,
+  not just a dot on the plot. A **"3D view" toggle** (`_toggle_live_dim`)
+  clears and rebuilds the embedded `Figure`'s Axes with/without
+  `projection="3d"` (matplotlib can't change an existing Axes' projection in
+  place) — `viz.toolpath_fig.draw_live_3d`/`update_live_marker_3d`, same cheap
+  marker-only-update pattern as the 2D pair. Redraws the layer/3D scene only
+  when it actually changes; otherwise just moves the marker — cheap enough to
+  run often. Throttled off the existing 120 ms tick via `ui.live_view_poll_s`
+  (default **0.15 s** — lowered from 1.0 s in C22 once driving feedback
+  called the motion "not smooth"; the layer-redraw-only-on-change logic was
+  already cheap, the 1 Hz call rate was the actual bottleneck). Static
+  (current layer, no marker) once a file loads; the marker tracks line
+  progress once a run starts and freezes at the final position when it ends.
+  No extra printer traffic — position comes from `Toolpath.progress_position`,
+  not a polled `M114`.
 - **"Z Calibrate…"** (`ui/zcal_dialog.ZCalDialog`, C21) — opens next to "Level
   Bed…"; idle-only. See its own module-table row and Known Technical Debt for
-  the config-is-the-trusted-offset design and the real-hardware caveat.
+  the config-is-the-trusted-offset design and the real-hardware caveat. Both
+  calibration buttons now carry a one-line caption (C22) distinguishing the
+  ABL mesh probe from the single nozzle-to-bed offset — driving feedback
+  flagged that two calibration buttons with no explanation looked redundant.
 - Temperature panel is *not* idle-gated (`set_temp` works mid-print, see `app.py`):
   each of the nozzle/bed rows shows the allowed range from
   `config['temps'][{nozzle,bed}_{min,max}_c]` and a live `now: A/B°C` label
@@ -581,6 +619,16 @@ parks, magnet dispensed, controlled press + lateral shear run, print resumes and
   `zcal.probe_z_offset` in `config.local.yaml` to match, start with a large
   step (0.5 mm), and watch the machine closely — see the Pre-hardware
   checklist item added for this.
+- **A real mid-session disconnect isn't reflected in the panel's status
+  label.** `Controller._connected` is set `True` in `connect()` and never
+  un-set — a physically unplugged USB cable or a dead serial port surfaces
+  only as an `error` event on the next command that tries to use it (jog,
+  `refresh_state`, …), not as the status flipping back to "not connected".
+  Flagged during the C22 GUI pass; not fixed because there's no printer on
+  hand right now to validate real failure behaviour against (an `AckTimeout`
+  doesn't always mean "disconnected" — it can just mean a slow response — so
+  guessing the right signal without hardware risked a worse false-positive).
+  Revisit once the applicator/bench work resumes.
 
 No rule violations recorded. Add any here (file + line) as they appear; do not omit.
 

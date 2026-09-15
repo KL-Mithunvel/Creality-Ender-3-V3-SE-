@@ -146,6 +146,26 @@ def update_live_marker(artists: dict, point: Point) -> None:
     artists["marker"].set_data([point[0]], [point[1]])
 
 
+def draw_live_3d(ax, tp: Toolpath) -> dict:
+    """Isometric 3D toolpath (the whole part, not one layer) plus an empty
+    nozzle-position marker, for the panel's live-print view "3D" toggle.
+    Same cheap-marker-update pattern as `draw_live_layer`/`update_live_marker`.
+    """
+    ax.clear()
+    draw_path_3d(ax, tp)
+    ax.view_init(elev=28, azim=-60)  # isometric-ish, matches most slicer previews
+    ax.set_xlabel("X")
+    ax.set_ylabel("Y")
+    ax.set_zlabel("Z")
+    (marker,) = ax.plot([], [], [], "o", ms=6, color="#c53b3b", zorder=6)
+    return {"marker": marker}
+
+
+def update_live_marker_3d(artists: dict, point: Point) -> None:
+    artists["marker"].set_data([point[0]], [point[1]])
+    artists["marker"].set_3d_properties([point[2]])
+
+
 def _project(pt: Point, plane: str) -> tuple[float, float]:
     return (pt[0], pt[1]) if plane == "xy" else (pt[0], pt[2])
 

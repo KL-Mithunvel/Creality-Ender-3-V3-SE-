@@ -9,7 +9,7 @@ chunks. Each chunk: build → `pytest` green → stage → commit.
 |--|--|
 | Owner | kl mithunvel |
 | Created | 2026-09-09 |
-| Status | **C1–C8 + Phase 1.6 (C13–C19) + C20 + C21 done — 218 tests.** One root `python main.py` (mode by flag), bring-your-own-G-code, toolpath + insert-motion preview, "Plan magnet insert…" dialog, panel polish, an embedded live-print view (current layer + nozzle marker + current-step G-code text) during a run, and a guided Z-offset calibration dialog. Magnet-flow hardware smoke test still pending the applicator build; the Z-calibration workflow is itself untested on real hardware — see Known Technical Debt. |
+| Status | **C1–C8 + Phase 1.6 (C13–C19) + C20 + C21 + C22 done — 223 tests.** One root `python main.py` (mode by flag), bring-your-own-G-code, toolpath + insert-motion preview, "Plan magnet insert…" dialog (now with an embedded live preview of the insert motion), panel polish, a scrollable panel with a mode/port indicator, an embedded live-print view (2D layer + isometric 3D toggle, nozzle marker, current-step G-code text) during a run, and a guided Z-offset calibration dialog. Magnet-flow hardware smoke test still pending the applicator build; the Z-calibration workflow is itself untested on real hardware — see Known Technical Debt. |
 | Overall plan | `project/PROJECT_PLAN.md` |
 | Architecture / rules | `.CLAUDE/CLAUDE.md` |
 
@@ -811,6 +811,89 @@ reading anything back from the printer.
 the real V3 SE — see `.CLAUDE/CLAUDE.md` → Known Technical Debt. Bench-test it
 deliberately (start with large steps, watch the machine, power switch within
 reach) before trusting it for a real print.
+
+---
+
+## Phase 1.9 — GUI usability pass from real driving feedback
+
+**Why.** Owner ran `main.py`'s GUI directly (sim mode, no printer attached) and
+reported several things at once: the "connected" status felt meaningless with
+no indication of *what* it was connected to; two calibration buttons with no
+explanation of why both exist; the raw G-code send box and log seemed to have
+disappeared; the live view felt choppy, not "real-time"; and asked for a 3D
+isometric view plus a visual "where it's going to move" preview inside "Plan
+magnet insert…" (the animated preview already existed as a separate popup -
+C16 - just not discovered/embedded).
+
+**Diagnosis (driven, not guessed) — an important process note:** a first
+screenshot attempt (`ImageGrab.grab` on absolute screen coordinates) captured
+the *owner's own* running window instead of the probe's, because both were on
+the same physical desktop. Switched to introspection-only driving instead: a
+withdrawn `Tk` root, the real `Controller`/`ControlPanel`/`PlanInsertDialog`
+objects driven programmatically, state read back via `winfo_reqheight()`,
+`.cget("text")`, artist data, etc. - reliable, and never touches the shared
+screen. Confirmed via that method: `panel.body.winfo_reqheight()` was ~1122 px
+against an 864 px screen - the send-G-code box and log genuinely were being
+clipped off-screen, not removed.
+
+### C22 — Mode/port label, scrollable panel, faster live-view redraw, 3D toggle, embedded insert preview  ✅
+
+**Done:**
+- `app.Controller.link_summary` - `"simulator"` / `"printer COM3"` / `"printer
+  COM3 + dispenser COM4"` / `"... + dispenser (sim)"`, from whether
+  `printer`/`dispenser` have a `.port` attribute (`SerialPrinter`/
+  `SerialDispenser` do, `SimPrinter`/`SimDispenser` don't). Shown next to the
+  connection status so "connected" is never ambiguous about *what*.
+- `ui/panel.py` - the whole panel now lives in a scrollable `Canvas` +
+  `Scrollbar` (`_build_scroll_container`; mouse-wheel bound only while the
+  pointer is over the canvas, so it doesn't hijack scrolling inside a dialog's
+  own widgets); `run_gui()` gives the window a sane starting size
+  (640×800, `minsize` 480×360, resizable) instead of sizing to the full
+  content height. Nothing is clipped regardless of screen height - it scrolls.
+- Calibration buttons regrouped with one-line captions instead of just two
+  bare buttons: "Level Bed…" / "probe + save bed mesh" and "Z Calibrate…" /
+  "paper-test nozzle offset" - they're genuinely different procedures (ABL
+  mesh vs. the single nozzle-to-bed offset), not a duplicate.
+- `ui.live_view_poll_s` default lowered **1.0 s → 0.15 s** (config.yaml) - the
+  live view was only ever throttled by this one knob (the layer-redraw-only-
+  on-change optimization from C20 was already cheap; the real bottleneck was
+  simply calling `_sync_live_view()` once a second), so motion is now ~6-7×
+  more frequent, visibly smoother without materially more CPU (marker moves
+  are a `set_data` call, not a full redraw).
+- `viz/toolpath_fig.py` - `draw_live_3d(ax, tp)` / `update_live_marker_3d`,
+  same pattern as the 2D pair. `ui/panel.py` - a "3D view" toggle button in
+  the Live print view frame header (`_toggle_live_dim`): clears and rebuilds
+  the embedded `Figure`'s Axes with/without `projection="3d"` (matplotlib
+  can't change an existing Axes' projection in place), isometric-ish
+  `view_init(elev=28, azim=-60)`, same live marker semantics as the 2D view.
+- `ui/plan_dialog.py` - the dialog is now two columns: the existing fields on
+  the left, and an embedded **"Insert motion preview"** on the right (X-Y +
+  X-Z, phase-coloured nozzle path + dashed pole path + pocket marker) that
+  redraws on every keystroke via the existing `_check()` - drawn even when
+  out-of-envelope so the operator can see *why*. Built from the exact same
+  `sequences.geometry.plan_insert_moves` output the real run uses (via
+  `viz.toolpath_fig.plan_for`/`draw_insert_overlay`), so it can't drift from
+  reality. The separate animated popup (play/scrub, "Open 3D view") stays
+  available - renamed "Preview…" → **"Animate…"** to distinguish it from the
+  now-always-visible static embed. Also fixed a pre-existing gap: picking a
+  different shear direction didn't used to re-run `_check()`.
+- Tests: `test_app.py` (+4: `link_summary` for simulator / real printer only /
+  real printer + real dispenser / real printer + sim dispenser),
+  `test_viz.py` (+1: `draw_live_3d`/`update_live_marker_3d` headless),
+  `test_config.py` (updated default assertion). **223 tests.**
+- Manual: re-ran the introspection-driving script end-to-end after the
+  changes - status flips not-connected→connected correctly, mode/port label
+  reads "simulator" and "printer COM3" correctly for a real-link stand-in,
+  the 3D toggle actually swaps `live_ax.name` to `"3d"` and the marker holds
+  real 3D data mid-run, and the Plan dialog's embedded preview draws real
+  path data (15 plotted lines) with the correct envelope status text.
+
+**Not done (flagged, not built):** detecting a genuine mid-session hardware
+disconnect and flipping the status label back to "not connected" - today
+nothing in `Controller` ever un-sets `_connected`, so a real cable pull
+wouldn't be reflected there (it would still surface as an `error` event on the
+next command). No printer is available to validate real failure behaviour
+against right now; revisit once the applicator/bench work resumes.
 
 ---
 

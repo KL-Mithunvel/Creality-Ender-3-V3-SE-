@@ -76,7 +76,7 @@ def test_validate_rejects_bad_idle_poll():
 
 
 def test_ui_live_view_poll_default_present():
-    assert load_config()["ui"]["live_view_poll_s"] == 1.0
+    assert load_config()["ui"]["live_view_poll_s"] == 0.15
 
 
 def test_validate_rejects_bad_live_view_poll():

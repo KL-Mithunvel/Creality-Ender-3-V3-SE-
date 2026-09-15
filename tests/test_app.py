@@ -513,3 +513,30 @@ def test_progress_zero_then_advances_then_final(config):
     assert _wait(lambda: not ctl.running)
     done, total = ctl.progress
     assert total > 0 and done == total
+
+
+# --- C22: link_summary (GUI mode/port label) --------------------------
+
+def test_link_summary_simulator(config):
+    ctl = _ctl(config)
+    assert ctl.link_summary == "simulator"
+
+
+class _FakePort:
+    def __init__(self, port):
+        self.port = port
+
+
+def test_link_summary_real_printer_only(config):
+    ctl = Controller(_FakePort("COM3"), None, config)
+    assert ctl.link_summary == "printer COM3"
+
+
+def test_link_summary_real_printer_and_dispenser(config):
+    ctl = Controller(_FakePort("COM3"), _FakePort("COM4"), config)
+    assert ctl.link_summary == "printer COM3 + dispenser COM4"
+
+
+def test_link_summary_real_printer_sim_dispenser(config):
+    ctl = Controller(_FakePort("COM3"), SimDispenser(), config)
+    assert ctl.link_summary == "printer COM3 + dispenser (sim)"

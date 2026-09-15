@@ -604,3 +604,65 @@ smoke test.
 - Committed in phases per the owner's request: (1) the stale-TODO fix, (2) the
   C20 live view + current-step readout, (3) the C21 Z-calibration feature -
   see the commit log for exact hashes.
+
+## 2026-09-16 — GUI usability pass (C22), driven from the owner actually running it
+
+- Owner ran `main.py` themselves (sim mode, no printer on hand) and reported
+  several things at once: "connected" status felt meaningless with no target
+  shown; asked to add which COM port is which; questioned two calibration
+  buttons' sizing and why both exist; asked to see the new live-view graph;
+  wanted the exact current G-code line visible during a run; and asked where
+  the raw-G-code send box/log had gone. Mid-turn, two more asks landed: a full
+  3D isometric toggle for the live view (plus "why isn't it smooth/real-time"
+  - no printer attached, so purely a sim-speed/redraw-rate question), and a
+  visual "where it's going to move" simulation embedded in "Plan magnet
+  insert…" (that already existed as the separate C16 animated popup - just
+  not discovered/embedded).
+- Tried to screenshot the running GUI to check it directly. First attempt
+  (`PIL.ImageGrab` on absolute screen coordinates) captured the **owner's
+  own** window instead of the probe's - same physical desktop, both windows
+  near the same spot - and revealed their real in-progress work
+  (`Cube_PETG_7m59s.gcode`, a live "Plan magnet insert" dialog). Stopped that
+  approach immediately and told the owner; switched to introspection-only
+  driving for the rest of the session (withdrawn `Tk` root, drive the real
+  `Controller`/`ControlPanel`/`PlanInsertDialog` objects programmatically,
+  read state back via `winfo_reqheight()`, `.cget("text")`, artist data - never
+  touches the shared screen). That's how the actual clipping bug was
+  confirmed: `panel.body.winfo_reqheight()` ≈ 1122 px against an 864 px
+  screen - the send-G-code box and log were genuinely being clipped, not
+  removed.
+- Root-caused the "always says connected" report: the status text itself was
+  already correct (verified `not connected` → `connected` only after a real
+  `Controller.connect()`), but nothing showed *what* it was connected to, and
+  `--sim` (the default with no flag) always succeeds - so with no printer
+  attached the label looked suspicious even though it was accurate. Fixed by
+  adding `Controller.link_summary` (`"simulator"` / `"printer COM3"` / …)
+  next to the status, which also directly answers the COM-port ask.
+- Shipped as **Phase 1.9 — C22**: `link_summary`; the whole panel wrapped in
+  a scrollable `Canvas`+`Scrollbar` (mouse-wheel scoped to `<Enter>`/`<Leave>`
+  so it can't hijack a dialog's own scrolling); calibration buttons captioned
+  ("probe + save bed mesh" vs. "paper-test nozzle offset") instead of two
+  bare buttons; `ui.live_view_poll_s` default **1.0 s → 0.15 s** (the
+  layer-redraw-only-on-change logic from C20 was already cheap - the real
+  smoothness bottleneck was simply calling the sync function once a second);
+  a "3D view" toggle on the live-print view (`draw_live_3d`/
+  `update_live_marker_3d`, isometric `view_init`); and an embedded live
+  insert-motion preview in `PlanInsertDialog` (phase-coloured path, redraws
+  on every keystroke, built from the exact geometry the real run uses) -
+  kept the old popup too, renamed "Preview" → "Animate…" since it's now the
+  play/scrub-specific option, not the only way to see the motion.
+- Flagged, not fixed: a genuine mid-session hardware disconnect still isn't
+  reflected in the status label (`Controller._connected` is never un-set) -
+  no printer on hand to validate the right failure signal against, and
+  guessing wrong (e.g. treating every `AckTimeout` as a disconnect) seemed
+  riskier than leaving it flagged in Known Technical Debt for later.
+- Tests: 218 -> 223 (`link_summary` x4, `draw_live_3d`/`update_live_marker_3d`
+  x1, `test_config` default updated). Verified end-to-end via the
+  introspection-driving script: status flips correctly, `link_summary` reads
+  right for both a sim and a real-link stand-in, the 3D toggle actually swaps
+  `live_ax.name` to `"3d"` with a live 3D marker mid-run, and the Plan
+  dialog's embedded preview draws real path data with correct envelope text.
+- Docs synced: `TODO.md`, `project/BUILD_PLAN.md` (new Phase 1.9 / C22
+  section, including the screenshot-mishap process note), `README.md`,
+  `.CLAUDE/CLAUDE.md` (status line, module table rows, `app.py`/`ui/panel.py`/
+  `ui/plan_dialog.py` Key Modules sections, Known Technical Debt).

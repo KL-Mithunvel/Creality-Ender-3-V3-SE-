@@ -17,6 +17,13 @@ criteria, risks). Architecture and rules: `.CLAUDE/CLAUDE.md`. Keep all three in
 
 ## Done
 
+- [x] **Phase 1.9 — C22** (`project/BUILD_PLAN.md`) — GUI usability pass from real driving
+      feedback: mode/port label (`Controller.link_summary`) next to the connection status,
+      the whole panel wrapped in a scrollable canvas (nothing clips on a short screen
+      anymore), calibration buttons captioned to explain Level Bed vs. Z Calibrate, the
+      live view redraws ~6-7x faster (0.15 s vs. 1.0 s) for smoother motion, a "3D view"
+      isometric toggle, and an embedded live insert-motion preview in "Plan magnet
+      insert…" (phase-coloured path, updates on every keystroke). 223 tests.
 - [x] **Phase 1.8 — C21** (`project/BUILD_PLAN.md`) — "Z Calibrate…" guided paper-test
       Z-offset dialog (`ui/zcal_dialog.py`); config (`zcal.*`) is the trusted offset,
       not a printer readback; `M851`+`M500` on save. **Untested on real hardware —

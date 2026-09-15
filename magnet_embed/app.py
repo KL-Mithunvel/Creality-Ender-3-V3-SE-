@@ -84,6 +84,22 @@ class Controller:
         return self._connected
 
     @property
+    def link_summary(self) -> str:
+        """Human-readable description of what `printer`/`dispenser` actually
+        are - "simulator" or the real COM port(s) - so the panel's connection
+        status is never ambiguous about what it's connected to. `SimPrinter`/
+        `SimDispenser` have no `port` attribute; `SerialPrinter`/
+        `SerialDispenser` do."""
+        printer_port = getattr(self.printer, "port", None)
+        if printer_port is None:
+            return "simulator"
+        bits = [f"printer {printer_port}"]
+        if self.dispenser is not None:
+            dispenser_port = getattr(self.dispenser, "port", None)
+            bits.append(f"dispenser {dispenser_port}" if dispenser_port else "dispenser (sim)")
+        return " + ".join(bits)
+
+    @property
     def progress(self) -> tuple[int, int]:
         """(current line, total lines) of the active/last run; (0, 0) before any run."""
         r = self.runner

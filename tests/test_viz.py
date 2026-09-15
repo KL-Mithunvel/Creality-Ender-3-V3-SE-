@@ -91,3 +91,19 @@ def test_draw_live_layer_and_update_marker():
     tf.update_live_marker(art, pt)
     assert list(art["marker"].get_xdata()) == [pt[0]]
     assert list(art["marker"].get_ydata()) == [pt[1]]
+
+
+def test_draw_live_3d_and_update_marker():
+    tp = parse_toolpath(DATA / "sample.gcode")
+    fig = Figure()
+    ax = fig.add_subplot(1, 1, 1, projection="3d")
+    art = tf.draw_live_3d(ax, tp)
+    assert "marker" in art
+    assert len(art["marker"].get_data_3d()[0]) == 0
+
+    pt = tp.progress_position(tp.segments[-1].line_no)
+    tf.update_live_marker_3d(art, pt)
+    xs, ys, zs = art["marker"].get_data_3d()
+    assert list(xs) == [pt[0]]
+    assert list(ys) == [pt[1]]
+    assert list(zs) == [pt[2]]

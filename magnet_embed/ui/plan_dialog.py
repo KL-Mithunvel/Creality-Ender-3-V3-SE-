@@ -2,7 +2,10 @@
 
 The pure helpers (`resolve_target_z`, `magnet_output_path`, `save_magnet_gcode`,
 `envelope_report`) carry the logic and are unit-tested without Tk. `PlanInsertDialog`
-is a thin view over them.
+is a thin view over them, plus an embedded static preview (`_redraw_embedded_preview`,
+C22) showing the planned insert motion - phase-coloured nozzle path, pole path,
+pocket marker - live as the fields change, so "where it's going to move" is visible
+without opening the separate animated preview window.
 """
 
 from __future__ import annotations
@@ -10,6 +13,9 @@ from __future__ import annotations
 import tkinter as tk
 from pathlib import Path
 from tkinter import messagebox, ttk
+
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.figure import Figure
 
 from ..gcode.postprocess import inject_sentinel
 from ..gcode.toolpath import Toolpath, parse_toolpath
@@ -62,7 +68,8 @@ class PlanInsertDialog(tk.Toplevel):
     def __init__(self, master: tk.Misc, controller) -> None:
         super().__init__(master)
         self.title("Plan magnet insert")
-        self.resizable(False, False)
+        self.resizable(True, True)
+        self.minsize(560, 420)
         self.c = controller
         self.in_path = Path(controller.gcode_path)
         self.tp = parse_toolpath(self.in_path)
@@ -83,9 +90,12 @@ class PlanInsertDialog(tk.Toplevel):
         self._check()
 
     def _build(self) -> None:
-        frm = ttk.Frame(self, padding=12)
-        frm.pack(fill="both", expand=True)
-        ttk.Label(frm, text=f"file: {self.in_path.name}   "
+        body = ttk.Frame(self, padding=12)
+        body.pack(fill="both", expand=True)
+
+        frm = ttk.Frame(body)
+        frm.pack(side="left", fill="y")
+        ttk.Label(frm, text=f"file: {self.in_path.name}\n"
                             f"{self.tp.layer_count} layers, top Z {self.tp.top_z:.2f} mm"
                   ).grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 8))
 
@@ -101,8 +111,12 @@ class PlanInsertDialog(tk.Toplevel):
         field(3, "seat Z (mm)", self.sz)
 
         ttk.Label(frm, text="shear").grid(row=4, column=0, sticky="e", padx=(0, 6))
-        ttk.Combobox(frm, textvariable=self.shear, values=list(SHEAR_DIRS),
-                     width=5, state="readonly").grid(row=4, column=1, sticky="w")
+        shear_box = ttk.Combobox(
+            frm, textvariable=self.shear, values=list(SHEAR_DIRS),
+            width=5, state="readonly",
+        )
+        shear_box.grid(row=4, column=1, sticky="w")
+        shear_box.bind("<<ComboboxSelected>>", lambda _e: self._check())
 
         tgtfrm = ttk.LabelFrame(frm, text="insert at", padding=6)
         tgtfrm.grid(row=5, column=0, columnspan=4, sticky="ew", pady=(8, 4))
@@ -117,15 +131,23 @@ class PlanInsertDialog(tk.Toplevel):
         ttk.Checkbutton(frm, text="also write a real M0 (pause on microSD prints)",
                         variable=self.pause).grid(row=6, column=0, columnspan=4, sticky="w", pady=4)
 
-        self.status = ttk.Label(frm, text="", wraplength=320)
+        self.status = ttk.Label(frm, text="", wraplength=280)
         self.status.grid(row=7, column=0, columnspan=4, sticky="w", pady=(6, 8))
 
         bar = ttk.Frame(frm)
         bar.grid(row=8, column=0, columnspan=4, sticky="e")
-        ttk.Button(bar, text="Preview", command=self._preview).pack(side="left", padx=4)
+        ttk.Button(bar, text="Animate…", command=self._preview).pack(side="left", padx=4)
         self.btn_save = ttk.Button(bar, text="Save .magnet.gcode", command=self._save)
         self.btn_save.pack(side="left", padx=4)
         ttk.Button(bar, text="Close", command=self.destroy).pack(side="left", padx=4)
+
+        prev = ttk.LabelFrame(body, text="Insert motion preview - where it moves", padding=6)
+        prev.pack(side="left", fill="both", expand=True, padx=(12, 0))
+        self.prev_fig = Figure(figsize=(5.0, 4.6), dpi=90)
+        self.prev_ax_xy = self.prev_fig.add_subplot(2, 1, 1)
+        self.prev_ax_xz = self.prev_fig.add_subplot(2, 1, 2)
+        self.prev_canvas = FigureCanvasTkAgg(self.prev_fig, master=prev)
+        self.prev_canvas.get_tk_widget().pack(fill="both", expand=True)
 
     def _mi(self) -> MagnetInsert:
         return MagnetInsert(
@@ -140,8 +162,10 @@ class PlanInsertDialog(tk.Toplevel):
         except (ValueError, KeyError) as exc:
             self.status.configure(text=f"invalid input: {exc}", foreground="#c23a3a")
             self.btn_save.configure(state="disabled")
+            self._redraw_embedded_preview(None)
             return None
         bad = envelope_report(mi, self.c.config, self.tp)
+        self._redraw_embedded_preview(mi)
         if bad:
             self.status.configure(text="OUT OF ENVELOPE — " + "; ".join(bad),
                                   foreground="#c23a3a")
@@ -154,6 +178,33 @@ class PlanInsertDialog(tk.Toplevel):
         )
         self.btn_save.configure(state="normal")
         return mi
+
+    def _redraw_embedded_preview(self, mi: MagnetInsert | None) -> None:
+        """Static phase-coloured insert path (nozzle + pole, X-Y and X-Z),
+        redrawn on every keystroke via `_check()` - the same geometry
+        `sequences.insert_magnet` will actually drive, from `plan_for`
+        (`sequences.geometry.plan_insert_moves`), so this can't drift from
+        the real run. Drawn even when out-of-envelope so the operator can see
+        *why* (the "Animate…" window shows the same thing, plus play/scrub)."""
+        self.prev_ax_xy.clear()
+        self.prev_ax_xz.clear()
+        if mi is None:
+            self.prev_ax_xy.set_title("enter valid pocket coordinates", fontsize=9)
+            self.prev_canvas.draw_idle()
+            return
+        saved = tf.state_at_z(self.tp, mi.seat_z)
+        moves = tf.plan_for(mi, self.c.config, saved)
+        layer = self.tp.layer_for_z(mi.seat_z)
+        tf.draw_layer_xy(self.prev_ax_xy, self.tp, layer)
+        tf.draw_side_xz(self.prev_ax_xz, self.tp)
+        tf.draw_insert_overlay(self.prev_ax_xy, moves, saved, self.c.config, plane="xy")
+        tf.draw_insert_overlay(self.prev_ax_xz, moves, saved, self.c.config, plane="xz")
+        self.prev_ax_xy.plot(
+            [mi.pocket_x], [mi.pocket_y], "x",
+            color=tf.PHASE_COLOR["RESUME"], ms=9, mew=2,
+        )
+        self.prev_fig.tight_layout()
+        self.prev_canvas.draw_idle()
 
     def _preview(self) -> None:
         mi = self._check()
