@@ -17,6 +17,12 @@ criteria, risks). Architecture and rules: `.CLAUDE/CLAUDE.md`. Keep all three in
 
 ## Done
 
+- [x] **Phase 1.11 — C24** (`project/BUILD_PLAN.md`) — two-column full-screen panel
+      (jog/temperature/filament left, live view + send-G-code + log right, both
+      stretching to fill a maximized window — `run_gui()` opens `zoomed` by default);
+      fixed the 3D view's "extreme Z gaps" with explicit tight axis limits; added a
+      "Global bed" / "Local part" 3D crop toggle (Local makes a short/flat part ~2.7x
+      more prominent in the box, confirmed via `set_box_aspect`). 225 tests.
 - [x] **Phase 1.10 — C23** (`project/BUILD_PLAN.md`) — 2D + 3D live views shown side by
       side (no more toggle); 3D view gained the full bed plate, true equal-mm-per-axis
       scaling (`set_box_aspect`), and a path that grows progressively as the nozzle

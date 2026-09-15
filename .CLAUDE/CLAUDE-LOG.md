@@ -718,3 +718,67 @@ smoke test.
   section), `README.md`, `.CLAUDE/CLAUDE.md` (status line, module table rows,
   `ui/panel.py` Key Modules section rewritten for the side-by-side design),
   `requirements.txt` (`numpy`).
+
+## 2026-09-16 (cont.) — Asked to run+check the real GUI; two-column full-screen layout, Global/Local 3D crop (C24)
+
+- Owner asked me to run `main.py` and check the GUI myself. Tried a
+  subprocess (`python main.py` for real, not an in-process probe) and
+  screenshotted it by exact window handle this time (`FindWindowW`/
+  `GetWindowRect`, not blind coordinates - the fix for last time's
+  collision). Still captured the owner's own IDE window: `SetForegroundWindow`
+  from a background process is blocked by Windows' focus-stealing
+  prevention, so the launched window never actually raised, and the grab
+  captured whatever was really on top. Deleted the file immediately.
+  Concluded screen capture is not viable on this shared desktop *at all*,
+  regardless of technique - stopped trying it, full stop. Verified instead
+  via (1) the real headless entry point (`python main.py --sim --no-gui
+  tests/data/sample.gcode --confirm success`, exit code 0 - real proof the
+  shipped entry point works end to end, zero screen risk) and (2) the exact
+  GUI code path (`entry.build_links` + `Controller` + `ControlPanel`,
+  withdrawn root, state read back programmatically) - confirmed
+  `link_summary`/`target_lbl` correct, layout measurements, box aspect, and
+  the 3D path growing through a real run, all via the real `entry`-
+  constructed objects, not hand-rolled stand-ins.
+- Owner then gave four more pieces of feedback on the 3D view + layout: (1)
+  the 3D part was "hardly visible" with "extreme gaps" in Z; (2) wanted a
+  toggle between showing the whole bed ("global") and just the part
+  ("local"); (3) wanted the window to always open full-screen with
+  everything visible at once; (4) wanted the live view moved beside (not
+  below) jog/home and temperature, and the plots/log to actually resize to
+  use the screen.
+- Root-caused the Z-gap complaint: `draw_live_3d` was calling
+  `set_box_aspect` but never explicitly setting axis limits, so matplotlib's
+  own autoscale margin (on top of an already-tiny Z data range next to a
+  220 mm bed) is what produced the "hardly visible... weird gaps" look - not
+  a bug exactly, just no intentional control over the margin.
+- Shipped as **Phase 1.11 — C24**: `draw_live_3d(ax, tp, bed_xy, *,
+  show_bed=True)` now sets explicit `set_xlim`/`set_ylim`/`set_zlim` with a
+  controlled 15% margin; `show_bed=False` ("Local") crops X/Y tight to the
+  part's own bbox instead of the bed, while Z always uses the part's own
+  range in both modes (a 250 mm `machine.z_max` range would defeat the
+  purpose of showing an 8 mm part at all). `ui/panel.py` gained a "Global
+  bed" / "Local part" toggle button (`_toggle_bed_view`) next to the 3D
+  view, and a full **two-column** rewrite: `_build_left` (jog/home,
+  temperature, filament) and `_build_right` (live view, send-G-code, log)
+  replace the single stacked column, with the right column's grid weight
+  set to consume all extra width. `run_gui()` now calls `root.state
+  ("zoomed")` to open maximized by default (Windows; falls back to a fixed
+  geometry with a caught `TclError` elsewhere). Also fixed the scroll
+  container so it stretches `self.body`'s *height* to the canvas's visible
+  height too (previously only width was stretched) - otherwise a maximized
+  window's extra vertical space would just sit blank below a short body
+  instead of reaching the weighted rows (live view, log).
+- Verified via the introspection-driving script (window sized to a
+  simulated maximized display, real `entry.build_links`-constructed
+  objects): `body` actually stretches to fill the granted space (1069×741,
+  matching what was available - not just its minimal natural size); the
+  toggle changes the 3D X range (220 mm "Global" -> 104 mm "Local" for the
+  sample part) and the box-aspect Z ratio (0.049 -> 0.134, ~2.7× more
+  visually prominent); the 3D path keeps growing correctly in either mode
+  through a real run (0 -> 16 points).
+- Tests: 224 -> 225 (`draw_live_3d` Global-vs-Local: tighter X range, no
+  bed-outline artist in Local mode).
+- Docs synced: `TODO.md`, `project/BUILD_PLAN.md` (new Phase 1.11 / C24
+  section, including the second screenshot-mishap note), `README.md`,
+  `.CLAUDE/CLAUDE.md` (status line, module table rows, `ui/panel.py` Key
+  Modules section rewritten for the two-column layout).

@@ -4,18 +4,27 @@ Thin view over `magnet_embed.app.Controller`: buttons call the controller's
 action methods; a 120 ms timer drains `controller.poll_events()` and updates the
 widgets. All Tkinter work stays on the main thread.
 
-The whole panel is wrapped in a scrollable canvas (`_build_scroll_container`)
-so nothing gets clipped off-screen on a shorter display - everything below
-used to be built directly on `self`; it now lives in `self.body` instead.
+Two-column layout (C24): the top bar/files/run/progress rows span the full
+width; below that, jog/home + temperature + filament sit in a left column and
+the live-print view + send-G-code + log sit in a right column that expands to
+fill whatever width/height the window has - `run_gui()` opens maximized by
+default. The whole thing still lives inside a scrollable canvas
+(`_build_scroll_container`) as a fallback for a screen too small to fit
+everything even maximized; the canvas now also stretches `self.body` to fill
+any *extra* height so the weighted rows (the live view, the log) actually grow
+into it instead of leaving blank space.
 
 Embeds a small live-print view (`_sync_live_view`) driven off
 `Controller.toolpath` / `progress_point` - derived from G-code line progress
 against the parsed toolpath, so it costs no extra printer traffic and never
 contends with the streaming loop's own serial handshake. Two panels side by
 side, always both visible: the current layer in 2D, and an isometric 3D view
-of the whole bed + a path that grows as the nozzle actually passes through it
-(`viz.toolpath_fig.draw_live_3d`/`update_live_3d`) - plus a current-step
-G-code text line under both.
+with a path that grows as the nozzle actually passes through it
+(`viz.toolpath_fig.draw_live_3d`/`update_live_3d`) - a "Global bed / Local
+part" toggle swaps the 3D view between the whole bed (real scale, real
+context) and a tight crop around just the part (fills the view, easier to
+actually see on a short/flat print) - plus a current-step G-code text line
+under both.
 """
 
 from __future__ import annotations
@@ -50,6 +59,7 @@ class ControlPanel(ttk.Frame):
         self._live_layer = -1
         self._live_art2d: dict = {}
         self._live_art3d: dict = {}
+        self.live3d_global = True  # True = whole bed ("Global"), False = zoomed to the part ("Local")
         self._build_scroll_container()
         self._build()
         self.after(_POLL_MS, self._poll)
@@ -57,9 +67,13 @@ class ControlPanel(ttk.Frame):
     # --- scrolling shell --------------------------------------------
 
     def _build_scroll_container(self) -> None:
-        """Wrap the whole panel in a Canvas + Scrollbar so tall content (jog,
-        temps, filament, send G-code, log...) never gets clipped by a screen
-        shorter than the panel's natural height - it scrolls instead."""
+        """Wrap the whole panel in a Canvas + Scrollbar so tall content never
+        gets clipped by a screen shorter than the panel's natural height - it
+        scrolls instead. The canvas window is stretched to at least the
+        canvas's own visible height (never less than the body's natural
+        height) so a maximized window's extra space actually reaches the
+        weighted rows inside `self.body` (the live view, the log) instead of
+        leaving blank space below a short, un-stretched body."""
         canvas = tk.Canvas(self, highlightthickness=0)
         vsb = ttk.Scrollbar(self, orient="vertical", command=canvas.yview)
         canvas.configure(yscrollcommand=vsb.set)
@@ -71,7 +85,12 @@ class ControlPanel(ttk.Frame):
         self.body.bind(
             "<Configure>", lambda _e: canvas.configure(scrollregion=canvas.bbox("all"))
         )
-        canvas.bind("<Configure>", lambda e: canvas.itemconfigure(window, width=e.width))
+
+        def _on_canvas_configure(event: tk.Event) -> None:
+            req_h = self.body.winfo_reqheight()
+            canvas.itemconfigure(window, width=event.width, height=max(event.height, req_h))
+
+        canvas.bind("<Configure>", _on_canvas_configure)
 
         def _wheel(event: tk.Event) -> None:
             canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
@@ -88,7 +107,7 @@ class ControlPanel(ttk.Frame):
         row = 0
 
         top = ttk.Frame(b)
-        top.grid(row=row, column=0, sticky="ew", pady=(0, 6))
+        top.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(0, 6))
         ttk.Button(top, text="Connect", command=self.c.connect).pack(side="left")
         self.status = ttk.Label(top, text="not connected")
         self.status.pack(side="left", padx=8)
@@ -98,7 +117,7 @@ class ControlPanel(ttk.Frame):
         row += 1
 
         files = ttk.Frame(b)
-        files.grid(row=row, column=0, sticky="ew", pady=2)
+        files.grid(row=row, column=0, columnspan=2, sticky="ew", pady=2)
         ttk.Button(files, text="Load G-code…", command=self._load).pack(side="left")
         self.btn_plan = ttk.Button(files, text="Plan magnet insert…", command=self._plan_insert)
         self.btn_plan.pack(side="left", padx=6)
@@ -107,7 +126,7 @@ class ControlPanel(ttk.Frame):
         row += 1
 
         run = ttk.Frame(b)
-        run.grid(row=row, column=0, sticky="ew", pady=4)
+        run.grid(row=row, column=0, columnspan=2, sticky="ew", pady=4)
         self.btn_run = ttk.Button(run, text="Run", command=self.c.start_run)
         self.btn_pause = ttk.Button(run, text="Pause", command=self.c.pause)
         self.btn_resume = ttk.Button(run, text="Resume", command=self.c.resume)
@@ -117,38 +136,34 @@ class ControlPanel(ttk.Frame):
         row += 1
 
         prog = ttk.Frame(b)
-        prog.grid(row=row, column=0, sticky="ew", pady=(0, 4))
+        prog.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(0, 4))
         self.progressbar = ttk.Progressbar(prog, mode="determinate")
         self.progressbar.pack(side="left", fill="x", expand=True)
         self.prog_lbl = ttk.Label(prog, text="—", width=20)
         self.prog_lbl.pack(side="left", padx=6)
         row += 1
 
-        live = ttk.LabelFrame(b, text="Live print view  (2D layer / 3D bed, nozzle position)", padding=4)
-        live.grid(row=row, column=0, sticky="ew", pady=(0, 4))
-        plots = ttk.Frame(live)
-        plots.pack(fill="both", expand=True)
+        content_row = row
+        b.columnconfigure(0, weight=0)
+        b.columnconfigure(1, weight=1)
+        b.rowconfigure(content_row, weight=1)
 
-        live2d = ttk.Frame(plots)
-        live2d.pack(side="left", fill="both", expand=True)
-        self.live2d_fig = Figure(figsize=(2.1, 1.65), dpi=90)
-        self.live2d_ax = self.live2d_fig.add_subplot(1, 1, 1)
-        self.live2d_canvas = FigureCanvasTkAgg(self.live2d_fig, master=live2d)
-        self.live2d_canvas.get_tk_widget().pack(fill="both", expand=True)
+        left = ttk.Frame(b)
+        left.grid(row=content_row, column=0, sticky="nw", padx=(0, 8))
+        right = ttk.Frame(b)
+        right.grid(row=content_row, column=1, sticky="nsew")
+        right.columnconfigure(0, weight=1)
 
-        live3d = ttk.Frame(plots)
-        live3d.pack(side="left", fill="both", expand=True, padx=(4, 0))
-        self.live3d_fig = Figure(figsize=(2.1, 1.65), dpi=90)
-        self.live3d_ax = self.live3d_fig.add_subplot(1, 1, 1, projection="3d")
-        self.live3d_canvas = FigureCanvasTkAgg(self.live3d_fig, master=live3d)
-        self.live3d_canvas.get_tk_widget().pack(fill="both", expand=True)
+        self._build_left(left)
+        self._build_right(right)
 
-        self.live_line_lbl = ttk.Label(live, text="current step: —", anchor="w")
-        self.live_line_lbl.pack(fill="x", pady=(4, 0))
-        row += 1
+    def _build_left(self, left: ttk.Frame) -> None:
+        """Jog/home, temperature, filament - the compact controls column."""
+        lrow = 0
 
-        jog = ttk.LabelFrame(b, text="Jog / home  (idle only)", padding=6)
-        jog.grid(row=row, column=0, sticky="ew", pady=4)
+        jog = ttk.LabelFrame(left, text="Jog / home  (idle only)", padding=6)
+        jog.grid(row=lrow, column=0, sticky="ew", pady=4)
+        lrow += 1
         for i, mm in enumerate(_JOG_STEPS):
             ttk.Radiobutton(jog, text=f"{mm} mm", value=mm, variable=self.step).grid(
                 row=0, column=i, sticky="w"
@@ -177,10 +192,10 @@ class ControlPanel(ttk.Frame):
         ttk.Label(calib, text="paper-test nozzle offset", foreground="gray").grid(
             row=3, column=0, sticky="w"
         )
-        row += 1
 
-        temp = ttk.LabelFrame(b, text="Temperature  (works during a print too)", padding=6)
-        temp.grid(row=row, column=0, sticky="ew", pady=4)
+        temp = ttk.LabelFrame(left, text="Temperature  (works during a print too)", padding=6)
+        temp.grid(row=lrow, column=0, sticky="ew", pady=4)
+        lrow += 1
         temps_cfg = self.c.config.get("temps", {})
         noz_lo = temps_cfg.get("nozzle_min_c", 0)
         noz_hi = temps_cfg.get("nozzle_max_c", 260)
@@ -208,10 +223,10 @@ class ControlPanel(ttk.Frame):
         self.bed_now.grid(row=2, column=3, padx=(10, 0), pady=(8, 0))
         ttk.Label(temp, text=f"allowed {bed_lo:g}–{bed_hi:g}°C",
                   foreground="gray").grid(row=3, column=0, columnspan=4, sticky="w")
-        row += 1
 
-        fil = ttk.LabelFrame(b, text="Filament  (idle only)", padding=6)
-        fil.grid(row=row, column=0, sticky="ew", pady=4)
+        fil = ttk.LabelFrame(left, text="Filament  (idle only)", padding=6)
+        fil.grid(row=lrow, column=0, sticky="ew", pady=4)
+        lrow += 1
         ttk.Label(fil, text="mm").grid(row=0, column=0)
         self.fil_mm = ttk.Entry(fil, width=6)
         self.fil_mm.insert(0, "5")
@@ -224,25 +239,64 @@ class ControlPanel(ttk.Frame):
         self.btn_extrude.grid(row=0, column=4, padx=(12, 2))
         self.btn_retract = ttk.Button(fil, text="Retract", command=lambda: self._filament(-1))
         self.btn_retract.grid(row=0, column=5, padx=2)
-        row += 1
 
-        cmd = ttk.LabelFrame(b, text="Send G-code  (idle only)", padding=6)
-        cmd.grid(row=row, column=0, sticky="ew", pady=4)
+    def _build_right(self, right: ttk.Frame) -> None:
+        """Live-print view (2D + 3D side by side), send-G-code, state, log -
+        the column that expands to fill a maximized window."""
+        rrow = 0
+
+        live = ttk.LabelFrame(right, text="Live print view", padding=4)
+        live.grid(row=rrow, column=0, sticky="nsew", pady=(0, 4))
+        right.rowconfigure(rrow, weight=3)
+        rrow += 1
+        live.columnconfigure(0, weight=1)
+        live.rowconfigure(1, weight=1)
+
+        live_hdr = ttk.Frame(live)
+        live_hdr.grid(row=0, column=0, sticky="ew")
+        ttk.Label(live_hdr, text="2D current layer  /  3D:").pack(side="left")
+        self.btn_bed_view = ttk.Button(live_hdr, text="Global bed", width=10, command=self._toggle_bed_view)
+        self.btn_bed_view.pack(side="left", padx=(4, 0))
+
+        plots = ttk.Frame(live)
+        plots.grid(row=1, column=0, sticky="nsew")
+        plots.columnconfigure(0, weight=1)
+        plots.columnconfigure(1, weight=1)
+        plots.rowconfigure(0, weight=1)
+
+        live2d = ttk.Frame(plots)
+        live2d.grid(row=0, column=0, sticky="nsew")
+        self.live2d_fig = Figure(figsize=(3.6, 3.0), dpi=90)
+        self.live2d_ax = self.live2d_fig.add_subplot(1, 1, 1)
+        self.live2d_canvas = FigureCanvasTkAgg(self.live2d_fig, master=live2d)
+        self.live2d_canvas.get_tk_widget().pack(fill="both", expand=True)
+
+        live3d = ttk.Frame(plots)
+        live3d.grid(row=0, column=1, sticky="nsew", padx=(4, 0))
+        self.live3d_fig = Figure(figsize=(3.6, 3.0), dpi=90)
+        self.live3d_ax = self.live3d_fig.add_subplot(1, 1, 1, projection="3d")
+        self.live3d_canvas = FigureCanvasTkAgg(self.live3d_fig, master=live3d)
+        self.live3d_canvas.get_tk_widget().pack(fill="both", expand=True)
+
+        self.live_line_lbl = ttk.Label(live, text="current step: —", anchor="w")
+        self.live_line_lbl.grid(row=2, column=0, sticky="ew", pady=(4, 0))
+
+        cmd = ttk.LabelFrame(right, text="Send G-code  (idle only)", padding=6)
+        cmd.grid(row=rrow, column=0, sticky="ew", pady=4)
+        rrow += 1
         self.cmd_entry = ttk.Entry(cmd)
         self.cmd_entry.pack(side="left", fill="x", expand=True)
         self.cmd_entry.bind("<Return>", lambda _e: self._send_cmd())
         self.btn_send = ttk.Button(cmd, text="Send", command=self._send_cmd)
         self.btn_send.pack(side="left", padx=4)
-        row += 1
 
-        self.state_lbl = ttk.Label(b, text="position / temps: —")
-        self.state_lbl.grid(row=row, column=0, sticky="w", pady=(4, 2))
-        row += 1
+        self.state_lbl = ttk.Label(right, text="position / temps: —")
+        self.state_lbl.grid(row=rrow, column=0, sticky="w", pady=(4, 2))
+        rrow += 1
 
-        self.logbox = scrolledtext.ScrolledText(b, height=8, width=70, state="disabled")
-        self.logbox.grid(row=row, column=0, sticky="nsew")
-        b.rowconfigure(row, weight=1)
-        b.columnconfigure(0, weight=1)
+        self.logbox = scrolledtext.ScrolledText(right, height=10, width=50, state="disabled")
+        self.logbox.grid(row=rrow, column=0, sticky="nsew")
+        right.rowconfigure(rrow, weight=1)
 
     # --- actions -------------------------------------------------
 
@@ -289,14 +343,26 @@ class ControlPanel(ttk.Frame):
             self.c.load_gcode(path)
             self.file_lbl.configure(text=path.rsplit("/", 1)[-1])
 
+    def _toggle_bed_view(self) -> None:
+        """Swap the 3D view between the whole bed ("Global", real scale, real
+        context) and a tight crop around just the part ("Local" - fills the
+        view, much easier to actually see a short/flat print). Only the 3D
+        artists need to be rebuilt; the 2D view and the loaded toolpath are
+        unaffected."""
+        self.live3d_global = not self.live3d_global
+        self.btn_bed_view.configure(text="Global bed" if self.live3d_global else "Local part")
+        self._live_art3d = {}
+        self._sync_live_view()
+
     def _sync_live_view(self) -> None:
         """Redraw both embedded live-print canvases: the active layer in 2D
-        (`live2d_*`) and the whole bed isometrically in 3D (`live3d_*`),
-        driven from `Controller.progress_point`/`current_line_text` - derived
-        from line progress against the parsed toolpath, no extra printer
-        traffic. The 2D layer redraws only when the active layer changes; the
-        3D path grows in place via `update_live_3d` rather than a full
-        redraw. Static (no marker/path) before a run starts."""
+        (`live2d_*`) and the bed or part in 3D (`live3d_*`, per
+        `live3d_global`), driven from `Controller.progress_point`/
+        `current_line_text` - derived from line progress against the parsed
+        toolpath, no extra printer traffic. The 2D layer redraws only when
+        the active layer changes; the 3D path grows in place via
+        `update_live_3d` rather than a full redraw. Static (no marker/path)
+        before a run starts."""
         tp = self.c.toolpath
         if tp is None:
             return
@@ -319,7 +385,9 @@ class ControlPanel(ttk.Frame):
         if not self._live_art3d:
             machine = self.c.config.get("machine", {})
             bed_xy = (machine.get("x_max", 220.0), machine.get("y_max", 220.0))
-            self._live_art3d = tf.draw_live_3d(self.live3d_ax, tp, bed_xy)
+            self._live_art3d = tf.draw_live_3d(
+                self.live3d_ax, tp, bed_xy, show_bed=self.live3d_global
+            )
             self.live3d_fig.tight_layout()
         if total:
             tf.update_live_3d(self._live_art3d, tp, current_line)
@@ -459,8 +527,11 @@ def _to_float(entry: ttk.Entry, default: float) -> float:
 def run_gui(controller: Controller) -> None:
     root = tk.Tk()
     root.title("Magnet-Embedding Print Assistant")
-    root.geometry("640x800")
-    root.minsize(480, 360)
+    root.minsize(760, 560)
+    try:
+        root.state("zoomed")  # open maximized (Windows) - fits everything at once
+    except tk.TclError:
+        root.geometry("1200x820")  # non-Windows fallback: a generous default, not maximized
     panel = ControlPanel(root, controller)
     panel.pack(fill="both", expand=True)
     root.mainloop()

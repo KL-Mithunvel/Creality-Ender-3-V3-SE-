@@ -186,29 +186,57 @@ def progressive_path_3d(
     return xs, ys, zs
 
 
-def draw_live_3d(ax, tp: Toolpath, bed_xy: tuple[float, float]) -> dict:
-    """Isometric 3D view for the panel's live-print view: the full bed plate
-    (static outline, `bed_xy` = `machine.x_max`/`y_max`) plus an empty path
-    line - filled in progressively by `update_live_3d`, not drawn upfront
-    like `draw_path_3d` - and a position marker. `set_box_aspect` gives true
-    equal mm-per-axis scaling (matplotlib 3D defaults to stretching each axis
-    to fill the view, which visually distorts a part that's wide and flat).
+def draw_live_3d(ax, tp: Toolpath, bed_xy: tuple[float, float], *, show_bed: bool = True) -> dict:
+    """Isometric 3D view for the panel's live-print view: an empty path line
+    (filled in progressively by `update_live_3d`, not drawn upfront like
+    `draw_path_3d`) and a position marker, over either the whole bed
+    (`show_bed=True`, "Global") or a tight crop around just the part
+    (`show_bed=False`, "Local").
+
+    `set_box_aspect` + explicit `set_xlim`/`set_ylim`/`set_zlim` give true
+    equal mm-per-axis scaling with a deliberately small, fixed margin -
+    matplotlib 3D defaults to (a) stretching each axis to fill the view,
+    which visually distorts a part that's wide and flat, and (b) autoscaled
+    limits with a generous default margin, which is exactly what made a short
+    part look like a barely-visible sliver with odd-looking gaps between the
+    Z ticks when the whole 220 mm bed was forced into the same box: Global
+    mode has a lot of legitimate empty Z space above a short part (real
+    scale, real context), but Local mode should crop tight to the part so it
+    actually fills the view.
     """
     ax.clear()
     bx, by = bed_xy
-    xr = max(tp.bbox_max[0], bx) - min(tp.bbox_min[0], 0.0)
-    yr = max(tp.bbox_max[1], by) - min(tp.bbox_min[1], 0.0)
-    zr = max(tp.bbox_max[2] - min(tp.bbox_min[2], 0.0), 1.0)
-    ax.set_box_aspect((xr, yr, zr))
-    bed_x = [0.0, bx, bx, 0.0, 0.0]
-    bed_y = [0.0, 0.0, by, by, 0.0]
-    bed_z = [0.0, 0.0, 0.0, 0.0, 0.0]
-    ax.plot(bed_x, bed_y, bed_z, color="#9aa0a6", lw=1.0, ls="--", zorder=1)
+    if show_bed:
+        x0, x1 = 0.0, bx
+        y0, y1 = 0.0, by
+    else:
+        px = max((tp.bbox_max[0] - tp.bbox_min[0]) * 0.15, 2.0)
+        py = max((tp.bbox_max[1] - tp.bbox_min[1]) * 0.15, 2.0)
+        x0, x1 = tp.bbox_min[0] - px, tp.bbox_max[0] + px
+        y0, y1 = tp.bbox_min[1] - py, tp.bbox_max[1] + py
+
+    z0 = min(tp.bbox_min[2], 0.0)
+    z1 = max(tp.bbox_max[2], z0 + 1.0)
+    pz = max((z1 - z0) * 0.15, 0.5)
+    z0 -= pz
+    z1 += pz
+
+    ax.set_box_aspect((x1 - x0, y1 - y0, z1 - z0))
+    ax.set_xlim(x0, x1)
+    ax.set_ylim(y0, y1)
+    ax.set_zlim(z0, z1)
+
+    if show_bed:
+        bed_x = [0.0, bx, bx, 0.0, 0.0]
+        bed_y = [0.0, 0.0, by, by, 0.0]
+        bed_z = [0.0, 0.0, 0.0, 0.0, 0.0]
+        ax.plot(bed_x, bed_y, bed_z, color="#9aa0a6", lw=1.0, ls="--", zorder=1)
+
     ax.view_init(elev=28, azim=-60)  # isometric-ish, matches most slicer previews
     ax.set_xlabel("X")
     ax.set_ylabel("Y")
     ax.set_zlabel("Z")
-    (path,) = ax.plot([], [], [], color=_EXTRUDE, lw=1.2, zorder=4)
+    (path,) = ax.plot([], [], [], color=_EXTRUDE, lw=1.4, zorder=4)
     (marker,) = ax.plot([], [], [], "o", ms=6, color="#c53b3b", zorder=6)
     return {"path": path, "marker": marker}
 

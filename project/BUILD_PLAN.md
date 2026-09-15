@@ -9,7 +9,7 @@ chunks. Each chunk: build → `pytest` green → stage → commit.
 |--|--|
 | Owner | kl mithunvel |
 | Created | 2026-09-09 |
-| Status | **C1–C8 + Phase 1.6 (C13–C19) + C20 + C21 + C22 + C23 done — 224 tests.** One root `python main.py` (mode by flag), bring-your-own-G-code, toolpath + insert-motion preview, "Plan magnet insert…" dialog (now with an embedded live preview of the insert motion), panel polish, a scrollable panel with a mode/port indicator, an embedded live-print view (2D current-layer + isometric 3D shown side by side — bed plate, equal-scale axes, a path that grows as the nozzle passes through it — plus a nozzle marker and current-step G-code text) during a run, and a guided Z-offset calibration dialog. Magnet-flow hardware smoke test still pending the applicator build; the Z-calibration workflow is itself untested on real hardware — see Known Technical Debt. |
+| Status | **C1–C8 + Phase 1.6 (C13–C19) + C20 + C21 + C22 + C23 + C24 done — 225 tests.** One root `python main.py` (mode by flag, opens maximized), bring-your-own-G-code, toolpath + insert-motion preview, "Plan magnet insert…" dialog (now with an embedded live preview of the insert motion), a two-column panel (jog/temperature/filament on the left, the live-print view + send-G-code + log on the right, both stretching to fill a maximized window) with a mode/port indicator, an embedded live-print view (2D current-layer + isometric 3D shown side by side, with a Global-bed/Local-part crop toggle and tight equal-scale axes — a path that grows as the nozzle passes through it — plus a nozzle marker and current-step G-code text) during a run, and a guided Z-offset calibration dialog. Magnet-flow hardware smoke test still pending the applicator build; the Z-calibration workflow is itself untested on real hardware — see Known Technical Debt. |
 | Overall plan | `project/PROJECT_PLAN.md` |
 | Architecture / rules | `.CLAUDE/CLAUDE.md` |
 
@@ -953,6 +953,66 @@ its size... keep it side to side... isible in same screen."
   file), the final marker lands on the last move's endpoint, and
   `ax.get_box_aspect()` reflects the real X:Y:Z proportions (`[1.35, 1.35,
   0.05]` for the square-bed, thin sample part — not stretched to `[1,1,1]`).
+
+---
+
+### C24 — Two-column full-screen layout, tight 3D scaling, Global/Local crop toggle  ✅
+
+**Why.** Owner: the 3D part was "hardly visible" with "extreme gaps" in Z; asked
+for a toggle between the whole bed (global) and just the part (local); asked
+the window to always open full-screen with everything visible at once,
+plots/log resized to actually use that space, and the live view moved beside
+(not below) jog/home and temperature.
+
+**Done:**
+- `viz/toolpath_fig.py` — `draw_live_3d(ax, tp, bed_xy, *, show_bed=True)`:
+  now sets explicit `set_xlim`/`set_ylim`/`set_zlim` with a controlled 15%
+  margin (previously Z had no explicit limit at all - matplotlib's own
+  autoscale margin was doing something looser, which is what actually made
+  the Z ticks look like they had "extreme gaps"). `show_bed=True` ("Global")
+  spans the real bed (`machine.x_max`/`y_max`) with the dashed plate outline
+  drawn; `show_bed=False` ("Local") crops X/Y tightly to the part's own
+  bbox (+15% padding) and skips the bed outline. Z always uses the part's own
+  range in both modes (a full 250 mm `machine.z_max` range would defeat the
+  purpose - there's no "context" value in showing 240 mm of empty Z above an
+  8 mm part). `set_box_aspect` follows the same limits, so Local mode isn't
+  just a camera zoom - the part's Z ratio in the box genuinely grows (0.049
+  -> 0.134 for the sample file, confirmed via the introspection script -
+  visibly less "flat").
+- `ui/panel.py` — a "Global bed" / "Local part" toggle button
+  (`_toggle_bed_view`) in the live-view header, next to the 3D view; only
+  resets `_live_art3d` (the 2D view and loaded toolpath are untouched).
+  **Two-column layout**: `_build_left` (jog/home, temperature, filament) and
+  `_build_right` (live-print view, send-G-code, state line, log) replace the
+  single stacked column: top bar/files/run/progress still span the full
+  width, then the two columns sit side by side, with the right column's grid
+  weight set to consume all extra width. `_build_scroll_container`'s canvas
+  now also stretches `self.body`'s height to at least the canvas's own
+  visible height (previously only width was stretched) - so a maximized
+  window's extra vertical space reaches the weighted rows (live view, log)
+  instead of leaving blank space below a short body; still falls back to the
+  body's natural height (and scrolling) when content doesn't fit. `run_gui()`
+  calls `root.state("zoomed")` to open maximized by default (Windows; falls
+  back to a generous fixed geometry with a caught `TclError` on other
+  platforms, since `"zoomed"` isn't a valid Tk state everywhere).
+- Tests: `test_viz.py` (+1: `draw_live_3d` Global vs. Local - tighter X range,
+  no bed-outline line artist in Local mode). **225 tests.**
+- Manual: introspection-driving script (withdrawn root, real
+  `entry.build_links`-constructed objects, a window sized to a simulated
+  maximized display) - confirmed `body` actually stretches to fill the
+  granted space (not just its minimal natural size), the Global/Local toggle
+  changes X range (220 mm -> 104 mm for the sample part) and box aspect
+  (0.049 -> 0.134) as designed, and the 3D path keeps growing correctly in
+  either mode through a real run.
+
+**Process note (again):** attempted a real subprocess (`python main.py`)
+screenshot via its exact window handle (`FindWindowW`/`GetWindowRect`, not
+blind coordinates this time) - `SetForegroundWindow` from a background
+process is blocked by Windows' focus-stealing prevention, so the window never
+actually raised and the grab captured the owner's IDE again. Deleted
+immediately; screen capture is not attempted again on this shared desktop for
+any reason - introspection-driving (withdrawn root, real objects, state read
+back programmatically) is the verification method going forward.
 
 ---
 

@@ -60,11 +60,12 @@ involvement is acceptable at this stage.
 ## Running the System
 
 > Build status: **C1–C8 + Phase 1.6 (C13–C19) + Phase 1.7 (C20) + Phase 1.8
-> (C21) + Phase 1.9 (C22) + Phase 1.10 (C23) done, plus mid-print temp
-> control, a Level Bed button, a run-report summary in the log, in-panel
-> config editing, an embedded live-print view showing 2D and equal-scale
-> bed-aware 3D side by side, a guided Z-offset calibration dialog, and a
-> scrollable panel that shows what it's actually connected to — 224 tests**
+> (C21) + Phase 1.9 (C22) + Phase 1.10 (C23) + Phase 1.11 (C24) done, plus
+> mid-print temp control, a Level Bed button, a run-report summary in the
+> log, in-panel config editing, an embedded live-print view showing 2D and
+> equal-scale bed-aware 3D side by side with a Global-bed/Local-part crop
+> toggle, a guided Z-offset calibration dialog, and a two-column panel that
+> opens maximized and shows what it's actually connected to — 225 tests**
 > (`project/BUILD_PLAN.md`).
 > One root `python main.py` (mode by flag), `gcode/toolpath.py`, shared
 > `sequences/geometry.py`, a matplotlib toolpath + insert-motion preview
@@ -141,13 +142,13 @@ back-compat wrappers that call `entry` with a fixed mode.
 | `magnet_embed/gcode/runner.py` | `GcodeRunner` — streams lines, waits for `ok`, detects + parses the sentinel, drops firmware-pause codes (`M0`/`M1`/`M25`/`M600`/`M601`), handles pause / resume / cancel. |
 | `magnet_embed/gcode/postprocess.py` | Inserts the `;MAGNET_INSERT X Y Z S<dir>` sentinel comment at a chosen layer / height. |
 | `magnet_embed/gcode/toolpath.py` | `parse_toolpath(path) -> Toolpath` — a slice as ordered `Segment`s (travel vs extrude, each carrying a 1-based `line_no`), a layer→Z table (slicer markers, else Z-derived), bounding box, distances, rough time. `progress_position(current_line)` / `progress_layer(current_line)` bisect the parsed path to the nozzle position/layer implied by how far `GcodeRunner` has streamed — no extra printer traffic. Feeds the visualisation, the plan dialog, and the panel's live-print view. |
-| `magnet_embed/viz/toolpath_fig.py` | Pure preview helpers (`nozzle_waypoints`, `pole_waypoints`, `sample_polyline`, `state_at_z`, `progressive_path_3d`) + matplotlib `draw_*` functions (layer X–Y, side X–Z, 3D path, phase-coloured insert overlay, `draw_live_layer`/`update_live_marker` for the panel's 2D live view + `draw_live_3d`/`update_live_3d` for the 3D one — bed plate, equal-scale `set_box_aspect`, a path that grows as the nozzle passes through it). No GUI backend. |
+| `magnet_embed/viz/toolpath_fig.py` | Pure preview helpers (`nozzle_waypoints`, `pole_waypoints`, `sample_polyline`, `state_at_z`, `progressive_path_3d`) + matplotlib `draw_*` functions (layer X–Y, side X–Z, 3D path, phase-coloured insert overlay, `draw_live_layer`/`update_live_marker` for the panel's 2D live view + `draw_live_3d(..., show_bed=)`/`update_live_3d` for the 3D one — `show_bed=True` spans the real bed with the plate outline, `show_bed=False` crops tight to the part; both use explicit `set_xlim`/`set_ylim`/`set_zlim` + `set_box_aspect` for equal-scale axes with no autoscale-margin surprises, plus a path that grows as the nozzle passes through it). No GUI backend. |
 | `magnet_embed/viz/preview.py` | `PreviewWindow` (Tk `Toplevel`, matplotlib `FigureCanvasTkAgg`) — layer slider, play/scrub the nozzle + pole tip along `plan_insert_moves`, envelope violations flagged, "Open 3D view". `python main.py --preview FILE`. |
 | `magnet_embed/sequences/geometry.py` | `compute_targets` / `plan_insert_moves` / `check_envelope` / `pole_point` — the one place the insert-motion targets are computed. `insert_magnet` executes them; the preview + plan dialog draw and envelope-check the same numbers. |
 | `magnet_embed/sequences/insert_magnet.py` | The `SAVE → PARK → DISPENSE → APPROACH → PRESS → SHEAR → LIFT → ASK → RESUME` state machine. Targets come from `geometry.compute_targets`. |
 | `magnet_embed/app.py` | `Controller` — headless UI↔worker mediator (threads, queues, prompt blocking); optional `log_dir` writes a per-run transcript. `load_gcode()` caches a parsed `toolpath` + raw `gcode_lines` (best-effort — a parse failure logs and leaves them empty rather than blocking the load); `progress_point`/`current_line_text` derive the live nozzle position + current G-code line from them. `start_z_calibration()`/`nudge_z()`/`save_z_offset()` drive the Z Calibrate dialog (idle-only). `link_summary` → `"simulator"` / `"printer COM3"` / `"... + dispenser COM4"`, from whether the link objects have a `.port` (real) or not (sim). |
 | `magnet_embed/runlog.py` | `RunLog` — one `logs/<ts>-<name>.log` per streamed job, a timestamped line per event, plus a human-readable `=== SUMMARY ===` block appended on `close()` (duration, lines sent/total, sentinels seen, any errors, final position + temps). `summary_text` is also echoed to the panel log right after a run finishes. |
-| `magnet_embed/ui/panel.py` | Tkinter panel — thin view over `Controller`; the whole thing lives in a scrollable canvas so nothing clips on a short screen; shows a mode/port label (`Controller.link_summary`) next to the connection status; jog/home/Level-Bed/Z-Calibrate + raw G-code entry idle-only, "Plan magnet insert…", "Settings…", and "Z Calibrate…" dialogs, modal Success/Retry/Abort prompt, live log, an embedded live-print view showing the current layer (2D) and an isometric bed-aware 3D view **side by side** (not a toggle) + nozzle marker + current-step G-code text. |
+| `magnet_embed/ui/panel.py` | Tkinter panel — thin view over `Controller`; a two-column layout (jog/temperature/filament left, live view + send-G-code + log right, right column stretches to fill the window) wrapped in a scrollable canvas as a fallback so nothing clips on a screen too small even maximized; `run_gui()` opens maximized by default; shows a mode/port label (`Controller.link_summary`) next to the connection status; jog/home/Level-Bed/Z-Calibrate + raw G-code entry idle-only, "Plan magnet insert…", "Settings…", and "Z Calibrate…" dialogs, modal Success/Retry/Abort prompt, live log, an embedded live-print view showing the current layer (2D) and an isometric 3D view **side by side** with a "Global bed" / "Local part" crop toggle + nozzle marker + current-step G-code text. |
 | `magnet_embed/ui/plan_dialog.py` | "Plan magnet insert" dialog + pure helpers — set pocket X/Y, seat Z, shear, target layer/Z; envelope-check; an embedded live preview of the planned insert motion (redraws on every keystroke, even out-of-envelope, so the operator can see why); "Animate…" opens the separate play/scrub popup (C16); **Save `<stem>.magnet.gcode`** and load it. |
 | `magnet_embed/ui/settings_dialog.py` | "Settings" dialog — edit `printer.port`/`dispenser.port`/`magnet_tool_offset` from the panel, writes `config.local.yaml`. |
 | `magnet_embed/ui/zcal_dialog.py` | "Z Calibrate…" dialog — guided paper-test Z-offset workflow: home + travel to `zcal.{x,y,start_z}`, fine nudge buttons, Save applies the accumulated nudge to the trusted `config.zcal.probe_z_offset` (`Controller.save_z_offset`), never a value read back from the printer. **Untested on real hardware** — see Known Technical Debt. |
@@ -362,42 +363,62 @@ hardware attached.
   every `ui.idle_poll_s` while connected + idle. `_show_prompt` opens a modal
   **Success / Retry / Abort** (or **Ready / Abort**) dialog that calls
   `controller.answer_prompt`. Drains `poll_events()` every 120 ms.
-- **Scrollable (C22).** `_build_scroll_container` wraps everything in a `Canvas`
-  + `Scrollbar` (content built onto `self.body`, not `self` directly) — the
-  panel's natural content height regularly exceeds a laptop screen; it
-  scrolls instead of clipping the bottom rows off-window. Mouse-wheel
+- **Two-column layout, opens maximized (C24).** `_build` puts the top
+  bar/files/run/progress rows across the full width, then `_build_left`
+  (jog/home, temperature, filament) and `_build_right` (live-print view,
+  send-G-code, state line, log) sit side by side — `self.body`'s column 1
+  (right) carries the grid weight, so it consumes whatever extra width a
+  maximized window grants. `run_gui()` calls `root.state("zoomed")` to open
+  maximized by default (Windows; falls back to a fixed `1200x820` geometry
+  with a caught `tk.TclError` elsewhere, since `"zoomed"` isn't a universal
+  Tk state).
+- **Scrollable, as a fallback (C22/C24).** `_build_scroll_container` wraps
+  everything in a `Canvas` + `Scrollbar` (content built onto `self.body`, not
+  `self` directly) for a screen too small to fit everything even maximized;
+  it scrolls instead of clipping the bottom rows off-window. Mouse-wheel
   binding is scoped to `<Enter>`/`<Leave>` on the canvas so it doesn't hijack
-  scrolling inside a dialog's own widgets. `run_gui()` sets a fixed starting
-  size (640×800, `minsize` 480×360, resizable) instead of sizing to content.
-  C23 shrank the live-view plots and the log box specifically to reduce how
-  much scrolling is ever needed (content height 1185 px → 942 px, measured
-  via the introspection-driving script) — still taller than an 864 px
-  screen, so the scrollbar stays the guaranteed fallback rather than a goal
-  of eliminating it entirely.
+  scrolling inside a dialog's own widgets. C24: the canvas's `<Configure>`
+  handler now stretches the `self.body` window item to **at least** the
+  canvas's own visible height (`max(event.height, body.winfo_reqheight())`) —
+  previously only width was stretched, so a maximized window's extra
+  vertical space just sat blank below a short, un-stretched body instead of
+  reaching the weighted rows (the live view, the log); now those rows
+  actually grow to fill it, and the fallback to natural height (→ scrolling)
+  still applies whenever content genuinely doesn't fit.
 - **Mode/port label (C22).** `self.target_lbl` next to the connection status
   shows `controller.link_summary` (`"simulator"` / `"printer COM3"` / …) so
   "connected" is never ambiguous about *what* — the status text itself was
   already correct (`not connected` until `Controller.connect()` actually
   succeeds), the real gap was no visibility into which target it applied to.
-- **Live-print view** (`_sync_live_view`, C20/C22/C23) — two small
-  `FigureCanvasTkAgg` widgets side by side, always both visible (no toggle,
-  removed in C23): `live2d_*` shows the active layer's 2D toolpath plus a
-  marker at `controller.progress_point`; `live3d_*` shows the whole bed
-  isometrically (`viz.toolpath_fig.draw_live_3d`/`update_live_3d`) with a
-  path that **grows progressively** as the nozzle actually passes through it
-  (`progressive_path_3d`, not the whole part drawn upfront) and true
-  equal-mm-per-axis scaling (`ax.set_box_aspect`, so a wide flat part looks
-  wide and flat, not stretched to a cube). A label under both canvases shows
-  `controller.current_line_text` — "what the current step looks like" as
-  text, not just a dot on the plot. The 2D layer only redraws when the active
-  layer changes; the 3D path/marker update via cheap `set_data`/
-  `set_3d_properties` calls, not a full redraw — both cheap enough to run
-  often. Throttled off the existing 120 ms tick via `ui.live_view_poll_s`
-  (default **0.15 s** — lowered from 1.0 s in C22 once driving feedback
-  called the motion "not smooth"). Static (current layer, no marker/path)
-  once a file loads; tracks line progress once a run starts and freezes at
-  the final position when it ends. No extra printer traffic — position comes
-  from `Toolpath.progress_position`, not a polled `M114`.
+- **Live-print view** (`_sync_live_view`, C20/C22/C23/C24) — two
+  `FigureCanvasTkAgg` widgets side by side in the right column, always both
+  visible (no 2D/3D toggle, removed in C23): `live2d_*` shows the active
+  layer's 2D toolpath plus a marker at `controller.progress_point`; `live3d_*`
+  shows either the whole bed or just the part isometrically
+  (`viz.toolpath_fig.draw_live_3d`/`update_live_3d`, per `self.live3d_global`)
+  with a path that **grows progressively** as the nozzle actually passes
+  through it (`progressive_path_3d`, not the whole part drawn upfront) and
+  tight equal-mm-per-axis scaling (`ax.set_box_aspect` + explicit
+  `set_xlim`/`set_ylim`/`set_zlim`, so a wide flat part looks wide and flat —
+  not stretched to a cube, and not swamped by matplotlib's default autoscale
+  margin either, which is what caused the "extreme Z gaps" C24 fixed). A
+  **"Global bed" / "Local part"** button (`_toggle_bed_view`) next to the 3D
+  view's header swaps `live3d_global` and resets only `_live_art3d` — Global
+  spans the real bed with the plate outline drawn (real scale, real context);
+  Local crops tight to the part's own bbox with no bed outline (fills the
+  view — a short/flat part is otherwise "hardly visible" against a 220 mm
+  bed, per C24 driving feedback; confirmed via the introspection script that
+  Local's box-aspect Z ratio is ~2.7× larger than Global's for the sample
+  file). A label under both canvases shows `controller.current_line_text` —
+  "what the current step looks like" as text, not just a dot on the plot. The
+  2D layer only redraws when the active layer changes; the 3D path/marker
+  update via cheap `set_data`/`set_3d_properties` calls, not a full redraw —
+  both cheap enough to run often. Throttled off the existing 120 ms tick via
+  `ui.live_view_poll_s` (default **0.15 s** — lowered from 1.0 s in C22 once
+  driving feedback called the motion "not smooth"). Static (current layer,
+  no marker/path) once a file loads; tracks line progress once a run starts
+  and freezes at the final position when it ends. No extra printer traffic —
+  position comes from `Toolpath.progress_position`, not a polled `M114`.
 - **"Z Calibrate…"** (`ui/zcal_dialog.ZCalDialog`, C21) — opens next to "Level
   Bed…"; idle-only. See its own module-table row and Known Technical Debt for
   the config-is-the-trusted-offset design and the real-hardware caveat. Both

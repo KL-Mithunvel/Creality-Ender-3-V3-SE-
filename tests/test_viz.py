@@ -115,6 +115,23 @@ def test_draw_live_3d_and_update():
     assert len(art["path"].get_data_3d()[0]) > 0  # the printed-so-far path grew
 
 
+def test_draw_live_3d_local_mode_crops_tight_to_the_part():
+    tp = parse_toolpath(DATA / "sample.gcode")
+    fig = Figure()
+
+    ax_global = fig.add_subplot(1, 2, 1, projection="3d")
+    tf.draw_live_3d(ax_global, tp, (220.0, 220.0), show_bed=True)
+    gx0, gx1 = ax_global.get_xlim3d()
+    assert gx1 - gx0 == pytest.approx(220.0)  # spans the whole bed
+    assert len(ax_global.lines) == 3  # bed outline + empty path + empty marker
+
+    ax_local = fig.add_subplot(1, 2, 2, projection="3d")
+    tf.draw_live_3d(ax_local, tp, (220.0, 220.0), show_bed=False)
+    lx0, lx1 = ax_local.get_xlim3d()
+    assert lx1 - lx0 < gx1 - gx0  # tighter than the full bed
+    assert len(ax_local.lines) == 2  # no bed outline in Local mode, just path + marker
+
+
 def test_progressive_path_3d_only_includes_printed_extruding_moves():
     tp = parse_toolpath(DATA / "sample.gcode")
     first_extrude = next(s for s in tp.segments if s.extruding)

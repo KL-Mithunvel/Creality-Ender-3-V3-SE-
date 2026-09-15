@@ -55,7 +55,7 @@ Everything below assumes `.venv` is active (`.venv\Scripts\activate`).
 **Automated tests — no hardware needed:**
 
 ```bat
-python -m pytest                          :: full suite (224 tests)
+python -m pytest                          :: full suite (225 tests)
 python -m py_compile main.py magnet_embed\*.py magnet_embed\ui\*.py magnet_embed\gcode\*.py magnet_embed\sequences\*.py magnet_embed\links\*.py magnet_embed\viz\*.py
 ```
 
@@ -95,7 +95,7 @@ the first `--printer` / `--hardware` run on a given machine.
 | `.CLAUDE/CLAUDE.md` | Full project brief — architecture, modules, conventions, rules |
 | `project/HOW_IT_WORKS.md` | Plain-language walkthrough of the whole system (start here if new) |
 | `project/PROJECT_PLAN.md` | Multi-phase plan — goals, steps, files, success criteria, risks, checklist |
-| `project/BUILD_PLAN.md` | Software build broken into commit-sized chunks (C1–C8, Phase 1.6 C13–C19, Phase 1.7 C20, Phase 1.8 C21, Phase 1.9 C22, Phase 1.10 C23) + protocol notes |
+| `project/BUILD_PLAN.md` | Software build broken into commit-sized chunks (C1–C8, Phase 1.6 C13–C19, Phase 1.7 C20, Phase 1.8 C21, Phase 1.9 C22, Phase 1.10 C23, Phase 1.11 C24) + protocol notes |
 | `project/RESEARCH.md` | Prior art & similar projects survey (OctoPNP, in-situ-placement papers, host-control patterns) + how each informs the design |
 | `docs/INVENTION_DISCLOSURE_DRAFT.md` | Working draft of the patent disclosure form (for inventor + attorney review) |
 | `TODO.md` | Task tracker (mirrors the plan checklists) |
@@ -103,21 +103,25 @@ the first `--printer` / `--hardware` run on a given machine.
 
 ## Status
 
-**Phase 1 + Phase 1.6 + Phase 1.7 + Phase 1.8 + Phase 1.9 + Phase 1.10
-software complete (224 tests).** One `python main.py` (mode by flag) drives
-the whole workflow against a simulated printer + dispenser: import a slice →
-visualise the toolpath → simulate the magnet-insert motion → place the
-sentinel and save `*.magnet.gcode` → stream it → park / dispense / press /
-shear / Success·Retry·Abort / resume. The panel is scrollable (nothing clips
-on a short screen), shows what it's actually connected to (`"simulator"` /
-`"printer COM3"`), and has jog/home, raw G-code, extrude/retract, idle
-polling, a run-progress bar, and an embedded **live-print view** showing the
-current layer in 2D and an isometric 3D view **side by side** — the 3D view
-has the full bed plate for scale, true equal-mm-per-axis proportions (not
-stretched to fill the plot), and a path that grows as the nozzle actually
-passes through it, redrawn ~6–7×/s for smooth motion — plus a
-nozzle-position marker and the current G-code step's text under both. A
-guided **"Z Calibrate…"** paper-test Z-offset dialog rounds it out (config
+**Phase 1 + Phase 1.6 + Phase 1.7 + Phase 1.8 + Phase 1.9 + Phase 1.10 +
+Phase 1.11 software complete (225 tests).** One `python main.py` (mode by
+flag) opens **maximized** and drives the whole workflow against a simulated
+printer + dispenser: import a slice → visualise the toolpath → simulate the
+magnet-insert motion → place the sentinel and save `*.magnet.gcode` → stream
+it → park / dispense / press / shear / Success·Retry·Abort / resume. The
+panel is a two-column layout (jog/temperature/filament on the left; the live
+view, send-G-code, and log on the right, stretching to fill the window) and
+scrollable as a fallback on a smaller screen; it shows what it's actually
+connected to (`"simulator"` / `"printer COM3"`), and has jog/home, raw
+G-code, extrude/retract, idle polling, a run-progress bar, and an embedded
+**live-print view** showing the current layer in 2D and an isometric 3D view
+**side by side** — the 3D view has a **"Global bed" / "Local part"** toggle
+(the whole bed for scale/context, or a tight crop around just the part so a
+short/flat print is actually visible), true equal-mm-per-axis proportions
+with tight axis limits (no more odd Z-axis gaps), and a path that grows as
+the nozzle actually passes through it, redrawn ~6–7×/s for smooth motion —
+plus a nozzle-position marker and the current G-code step's text under both.
+A guided **"Z Calibrate…"** paper-test Z-offset dialog rounds it out (config
 is the trusted offset, `M851`+`M500` on save — **not yet bench-tested on
 real hardware**). "Plan magnet insert…" now shows an embedded live preview
 of the planned insert motion as you edit the pocket coordinates. Nozzle/bed
