@@ -59,8 +59,9 @@ involvement is acceptable at this stage.
 
 ## Running the System
 
-> Build status: **C1–C8 + Phase 1.6 (C13–C19) done, plus mid-print temp control
-> and a Level Bed button — 189 tests** (`project/BUILD_PLAN.md`).
+> Build status: **C1–C8 + Phase 1.6 (C13–C19) done, plus mid-print temp control,
+> a Level Bed button, and a run-report summary in the log — 194 tests**
+> (`project/BUILD_PLAN.md`).
 > One root `python main.py` (mode by flag), `gcode/toolpath.py`, shared
 > `sequences/geometry.py`, a matplotlib toolpath + insert-motion preview
 > (`main.py --preview`), a "Plan magnet insert…" dialog that saves
@@ -137,7 +138,7 @@ back-compat wrappers that call `entry` with a fixed mode.
 | `magnet_embed/sequences/geometry.py` | `compute_targets` / `plan_insert_moves` / `check_envelope` / `pole_point` — the one place the insert-motion targets are computed. `insert_magnet` executes them; the preview + plan dialog draw and envelope-check the same numbers. |
 | `magnet_embed/sequences/insert_magnet.py` | The `SAVE → PARK → DISPENSE → APPROACH → PRESS → SHEAR → LIFT → ASK → RESUME` state machine. Targets come from `geometry.compute_targets`. |
 | `magnet_embed/app.py` | `Controller` — headless UI↔worker mediator (threads, queues, prompt blocking); optional `log_dir` writes a per-run transcript. |
-| `magnet_embed/runlog.py` | `RunLog` — one `logs/<ts>-<name>.log` per streamed job, a timestamped line per event. |
+| `magnet_embed/runlog.py` | `RunLog` — one `logs/<ts>-<name>.log` per streamed job, a timestamped line per event, plus a human-readable `=== SUMMARY ===` block appended on `close()` (duration, lines sent/total, sentinels seen, any errors, final position + temps). `summary_text` is also echoed to the panel log right after a run finishes. |
 | `magnet_embed/ui/panel.py` | Tkinter panel — thin view over `Controller`; jog/home + raw G-code entry idle-only, "Plan magnet insert…" dialog, modal Success/Retry/Abort prompt, live log. |
 | `magnet_embed/ui/plan_dialog.py` | "Plan magnet insert" dialog + pure helpers — set pocket X/Y, seat Z, shear, target layer/Z; envelope-check; Preview; **Save `<stem>.magnet.gcode`** and load it. |
 | `dispenser_fw/` | Arduino Uno sketch for the magazine servo (Phase 2). |

@@ -55,7 +55,8 @@ def test_end_to_end_sim_run_with_runlog(config, tmp_path):
     text = logs[0].read_text()
     assert "MAGNET_INSERT" in text
     assert "insert sequence complete" in text
-    assert text.rstrip().endswith("close")
+    assert text.rstrip().endswith("=== END SUMMARY ===")
+    assert "lines sent:" in text and "errors: none" in text
 
 
 def test_end_to_end_abort_is_reported_and_logged(config, tmp_path):

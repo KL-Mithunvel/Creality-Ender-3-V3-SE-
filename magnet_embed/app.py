@@ -304,6 +304,7 @@ class Controller:
         finally:
             if self._runlog is not None:
                 self._runlog.close()
+                self._emit("log", self._runlog.summary_text)
                 self._runlog = None
 
     def _on_sentinel(self, mi: MagnetInsert) -> None:
