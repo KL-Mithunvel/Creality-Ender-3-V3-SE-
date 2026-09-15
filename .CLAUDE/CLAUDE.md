@@ -596,10 +596,42 @@ parks, magnet dispensed, controlled press + lateral shear run, print resumes and
 ## Known Technical Debt
 
 - **No hardware validation of the magnet flow yet.** The whole stack is proven
-  against `SimPrinter` / `SimDispenser` (185 tests); only the printer *serial link*
-  has run on the real machine (COM3). The first magnet-flow bench session may
-  surface firmware-serial quirks (the Ender-3 V3 SE has known OctoPrint friction)
-  and mechanism issues. Treat it as debugging, not production.
+  against `SimPrinter` / `SimDispenser` (225 tests); only the printer *serial
+  link* and a plain streamed print have run on the real machine (COM3). The
+  first magnet-flow bench session may surface firmware-serial quirks (the
+  Ender-3 V3 SE has known OctoPrint friction) and mechanism issues. Treat it as
+  debugging, not production.
+- **🔴 Nozzle-vs-part collision is not checked (Dev Rule 7/12 gap, found
+  2026-09-16).** `sequences/geometry.check_envelope` only tests bed limits.
+  With `magnet_tool_offset.z > 0` (pole above nozzle, the default) PRESS drives
+  the *nozzle* to `seat_z − offset.z`, below the seat, at `offset.xy` from the
+  pocket — inside the printed part unless the pocket is within the offset of a
+  part edge. Reproduced on `tests/data/sample.gcode`: the planner says OK for
+  nozzle X30 Y60 Z1 inside an 80 × 80 mm part printed to Z 6. The Plan dialog's
+  side view draws the collision but the status text still reads OK. Fix planned:
+  toolpath-derived footprint/height check in `check_envelope` (so the dialog,
+  preview and run all inherit it) plus a design decision on a deployable pole
+  vs. a pocket-near-edge constraint (`project/PROJECT_PLAN.md` §6, disclosure
+  draft Q9/Q11). Until fixed, **plan pockets so the nozzle lands outside the
+  part footprint** and check the X–Z preview by eye.
+- **No emergency stop, no safe cancel.** `Controller.cancel` only stops
+  streaming — heaters stay on, the head stays put, and there is no `M112`
+  button. Planned: an Emergency Stop that bypasses the printer lock, and a
+  configurable cancel routine (retract, lift, park, heaters off).
+- **Home / Level Bed / Z Calibrate block the Tk main thread** for their whole
+  duration, so nothing in the panel (including a future stop button) is
+  clickable during a two-minute probe. Planned: run one-off commands on a short
+  worker thread under `_printer_lock`.
+- **`Controller.connect` is not idempotent and there is no Disconnect.** A
+  second Connect click on a real link reopens an open port; the exception
+  escapes the Tk callback and nothing shows in the panel.
+- **The insert sequence is invisible while it runs.** `insert_magnet` has no
+  phase callback; the live view freezes at the sentinel line (position is
+  derived from line progress). Planned: `on_phase` callback → log line + panel
+  phase badge + planned-path overlay on the 2D view during `_in_insert`.
+- **Plain-line streaming has no resend recovery.** No `N` numbers / checksums;
+  a `Resend:` is fatal, so one serial glitch ends a multi-hour print. Planned
+  for real prints: line numbers + checksum + a small resend buffer.
 - **Tool offset / press depth / shear params in `config.yaml` are guesses.** They must
   be measured on the real machine (`config.local.yaml`) — see `PROJECT_PLAN.md` §8.
 - **`dispenser_fw/` (the Arduino sketch) does not exist yet.** `SerialDispenser`

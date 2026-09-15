@@ -216,12 +216,13 @@ insert sequence, the runner, and (later) the UI can be run and tested end-to-end
 with nothing plugged in. When we do plug in the real printer (chunk C5), only the
 two `*_serial.py` files are new — everything above them is already proven.
 
-There are **94 automated tests** (`pytest`) covering: the sentinel parser and
+There are **225 automated tests** (`pytest`) covering: the sentinel parser and
 post-processor (Cura + PrusaSlicer), the simulated printer's G-code handling, the
-streaming runner (pause/cancel), every branch of the insert sequence (happy path,
-out-of-range, retry, abort, dispenser failure, mode restore), the threaded
-UI-mediator, and the real serial links + Marlin reply parser (driven by a fake
-serial port).
+streaming runner (pause/cancel, firmware-pause skipping), every branch of the
+insert sequence (happy path, out-of-range, retry, abort, dispenser failure, mode
+restore), the shared insert geometry, the toolpath parser and preview drawing,
+the planner dialog helpers, the threaded UI-mediator, and the real serial links +
+Marlin reply parser (driven by a fake serial port).
 
 ---
 

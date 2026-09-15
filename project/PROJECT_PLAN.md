@@ -4,8 +4,8 @@
 |--|--|
 | Owner | kl mithunvel |
 | Created | 2026-09-09 |
-| Updated | 2026-09-09 |
-| Status | Phase 1 **software** complete (94 tests, see `project/BUILD_PLAN.md`). Phase 0 (mechanical) and Phase 1/2 hardware not started. |
+| Updated | 2026-09-16 |
+| Status | Phase 1 software complete through C24 (225 tests, see `project/BUILD_PLAN.md`); printer serial link + a real streamed print verified on hardware. Phase 0 (mechanical) and the magnet-flow hardware work not started. **Open design issue:** nozzle-vs-part collision during PRESS with a pole-above-nozzle offset — see §6. |
 | Full brief | `.CLAUDE/CLAUDE.md` |
 | Task tracker | `TODO.md` |
 | Session history | `.CLAUDE/CLAUDE-LOG.md` |
@@ -113,7 +113,8 @@ PARK      M83; retract 2–5 mm; Z-hop to safe clearance; nozzle → standby_noz
 DISPENSE  dispenser.dispense()  (Phase 1: operator prompt "magnet loaded on pole?")  → magnet on the pole
 APPROACH  move XY to  pocket_xy − magnet_tool_offset.xy  at safe Z
           host checks the target is in-envelope → on failure: abort, print stays paused
-PRESS     Z down to  seat_z + magnet_tool_offset.z  at press.feed;  dwell press.dwell_ms
+PRESS     Z down to  seat_z − magnet_tool_offset.z  at press.feed;  dwell press.dwell_ms
+          (offset = pole tip − nozzle tip, so a pole ABOVE the nozzle means the nozzle goes BELOW the seat)
 SHEAR     lateral move  shear.distance  along  shear_dir  at  shear.feed
 LIFT      Z to safe clearance;  move clear of the part
 ASK       prompt() → "success" | "retry" | "abort"
@@ -202,7 +203,7 @@ sleep disabled.
 **Phase 1 done when**
 - [x] Simulation: full sample print completes with one operator-driven insert (`test_integration_sim.py`)
 - [ ] Hardware: same on the printer, on a Phase 0 coupon, nozzle hot, real filament
-- [x] All 1.x success criteria met; tests cover happy path + ack timeout + bad sentinel + out-of-envelope (94 tests)
+- [x] All 1.x success criteria met; tests cover happy path + ack timeout + bad sentinel + out-of-envelope (225 tests as of C24)
 
 > Implementation notes: built as chunks C1–C6 (`project/BUILD_PLAN.md`). Deviations
 > from this table: helpers landed in `gcode/util.py`; the UI mediator is a separate
@@ -258,6 +259,17 @@ the printer-driven press + lateral shear on real parts.
   from config, and **aborts the sequence (print paused) if out of range** — it never
   commands an out-of-bounds move (Dev Rule 12).
 - Keep the magnet pocket well inside the reachable area at design time.
+- **Nozzle-vs-part collision (found 2026-09-16, not yet fixed).** The envelope
+  check only tests bed limits. With the pole tip *above* the nozzle (`offset.z`
+  positive, the current default) the nozzle presses to `seat_z − offset.z`, i.e.
+  *below* the seat, at a point `offset.xy` away from the pocket — inside the
+  part unless the pocket is within the offset distance of a part edge. On
+  `tests/data/sample.gcode` the planner reports OK for a nozzle target of
+  X30 Y60 Z1 inside an 80 × 80 mm coupon printed up to Z 6. Fix: extend
+  `sequences/geometry.check_envelope` with a toolpath-derived footprint/height
+  check (bbox first, per-layer occupancy later), and decide the applicator
+  variant — pocket-near-edge constraint, or a deployable pole (Q11 of the
+  disclosure draft). Tracked in `TODO.md`.
 
 ---
 

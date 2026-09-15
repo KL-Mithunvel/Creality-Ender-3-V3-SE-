@@ -203,6 +203,19 @@ transform with an envelope guard, since the firmware is untouched.
 - **B8. Simulation layer** — software twins of A7 and A5 for development/testing.
 - **B9. Arduino firmware** — receives `DISPENSE`, cycles the servo through one
   escapement stroke, reports `OK` / `ERR`; idle watchdog safes the servo.
+- **B10. Insert planner + preview** — a dialog in which the operator enters the
+  pocket position, seat height, release direction and target layer; it computes
+  the carriage moves from the *same* geometry function B5 executes, draws the
+  planned nozzle and pole paths over the sliced part (plan view and side view,
+  plus an animated play/scrub view), runs the B4 check live as the fields
+  change, and writes the sentinel into a copy of the file. "What is previewed
+  is what runs" — the preview cannot drift from the executed motion.
+- **B11. Firmware-pause substitution** — the streaming runner recognises the
+  slicer/firmware pause codes (`M0`, `M1`, `M25`, `M600`, `M601`) and withholds
+  them, because the host owns the pause and B5 does the parking. The
+  post-processor can optionally write a real `M0` next to the sentinel, so a
+  single file both pauses correctly when printed from the SD card (manual
+  insert) and streams cleanly through the host (automated insert).
 
 ## 8. How the Invention works
 
@@ -215,7 +228,10 @@ transform with an envelope guard, since the firmware is untouched.
    and temperature) and calls **B5** with the parsed values from **B3**.
 5. **B4** computes the carriage target = pocket − offset and the press depth =
    seat_z − offset_z, and checks all targets are reachable; if not, it aborts with
-   the print still paused.
+   the print still paused. *(Planned extension, see Q9 item 7: the same check
+   also tests the nozzle position during PRESS/SHEAR against the printed part's
+   own footprint, derived from the sliced toolpath, so the nozzle can never be
+   driven into the partly-printed part while the pole seats the magnet.)*
 6. **B5** runs:
    - **SAVE** the current position, filament counter, coordinate/extruder modes,
      feedrate, temperatures.
@@ -262,6 +278,22 @@ Candidate novel aspects (for the agent to sharpen into claims):
    `M400`-gated, fully state-restoring interrupt/resume routine specific to
    mid-print component insertion on a single-tool machine.
 6. **Clip-on, printer-agnostic** add-on: works on an unmodified consumer printer.
+7. **Collision-aware placement check using the part's own toolpath.** Because
+   the pole is offset from the nozzle, seating the magnet puts the *nozzle* at a
+   different XY and, with a pole tip above the nozzle, *below* the seat height.
+   The host derives the printed part's footprint and local height from the
+   sliced G-code it is already streaming and refuses any PRESS/SHEAR whose
+   nozzle position would lie inside the partly-printed part. A bed-limit check
+   alone cannot catch this; the toolpath-derived check is specific to
+   single-tool, offset-tool insertion.
+8. **Pause-code substitution for one dual-use file.** The host withholds
+   firmware pause codes and runs its own park/insert/resume routine in their
+   place, so a file carrying both a conventional pause and the sentinel prints
+   correctly from the SD card (operator inserts by hand) *and* through the host
+   (automated insert) without re-slicing.
+9. **Preview-equals-execution planning.** The operator-facing planner draws and
+   envelope-checks the identical geometry the run executes (one shared
+   function), so the previewed motion is the commanded motion by construction.
 
 ## 10. Advantages / improvements over existing methods
 
@@ -296,6 +328,23 @@ Candidate novel aspects (for the agent to sharpen into claims):
   keyed to layer number; a slicer plugin that emits the sentinel directly.
 - **Motion variants**: press by servo instead of Z (hybrid); tool raised/lowered by
   a second servo for printers where clearance is tight.
+- **Pole-height variants (offset-Z sign)** — the key mechanical trade-off:
+  - *Pole tip above the nozzle tip* (positive Z offset; current baseline): the
+    applicator never touches the part during normal printing, but the nozzle
+    descends below the seat height while pressing, so the pocket must lie within
+    the lateral offset distance of the part's edge (nozzle lands outside the
+    footprint) and the host enforces the toolpath collision check (Q9 item 7).
+  - *Pole tip below the nozzle tip* (negative Z offset): any pocket location is
+    reachable, but the pole would foul normal printing unless it is deployable.
+  - *Deployable pole*: the pole retracts above the nozzle during printing and is
+    deployed only for the insert — by the same single servo that dispenses (its
+    stroke both isolates a magnet and lowers the pole), by a passive latch the
+    printer engages by moving against a fixed post at the bed edge (no extra
+    actuator), or by a second servo. In every variant the printer's motion still
+    performs the press and the lateral shear.
+- **Pocket-placement variant**: the part is designed so the pocket sits within
+  the offset distance of an outer edge, removing the need for a deployable pole
+  at the cost of a design constraint.
 - **Control variants**: fully automated confirmation via a hall-effect / vision
   check of the pole instead of an operator prompt; migration to Klipper macros;
   Raspberry Pi host; networked/headless operation.
@@ -335,37 +384,82 @@ See Q7 (components) + Q8 (operation). Worked example (simulation, current build)
   above nozzle tip).
 - Host computes: carriage approach = (30, 60); press nozzle Z = 6 − 5 = 1 mm;
   shear target = (35, 60). All within the 220 × 220 × 250 mm envelope → proceed.
-- Sequence executes SAVE→PARK(retract 3 mm, Z-hop +15 mm, nozzle→160 °C)→DISPENSE
-  →APPROACH→PRESS(F60, 500 ms dwell)→SHEAR(5 mm @ F1200)→LIFT→ASK→RESUME
-  (nozzle→200 °C wait, return to (60, 60, 6), un-retract, `G92 E` restore).
+- The host emits the following commands, phase by phase (exactly what the
+  current implementation sends; `saved.*` are the values captured at SAVE, the
+  print position here is (60, 60, 6) with nozzle target 200 °C):
+
+  | Phase | Commands sent to the printer | Purpose |
+  |-------|------------------------------|---------|
+  | SAVE | `M400`, `M114` (read back) | Record X Y Z E, feedrate, G90/G91, M82/M83, temperatures |
+  | PARK | `M83` · `G1 E-3 F2400` · `G90` · `G1 Z21 F6000` · `M400` · `M104 S160` | Relative extrusion; retract 3 mm; lift to safe Z (saved Z + 15); wait; nozzle to standby |
+  | DISPENSE | `DISPENSE` → Uno (or operator prompt) | One magnet onto the holding pole |
+  | APPROACH | `G90` · `G1 X30 Y60 F6000` · `M400` | Carriage to pocket − offset, pole now over the pocket |
+  | PRESS | `G1 Z1 F60` · `G4 P500` · `M400` | Slow Z press to seat_z − offset_z; dwell 0.5 s; wait |
+  | SHEAR | `G1 X35 Y60 F1200` · `M400` | 5 mm lateral move in +X; pole slides off the seated magnet |
+  | LIFT | `G1 Z21 F6000` · `G1 X5 Y5 F6000` · `M400` | Clear the part; move to the park corner |
+  | ASK | operator prompt → success / retry / abort | Retry re-enters at DISPENSE (`RESET` sent to the Uno first) |
+  | RESUME | `M104 S200` · `M109 S200` · `G90` · `G1 Z21 F6000` · `G1 X60 Y60 F6000` · `M400` · `G1 Z6 F6000` · `M400` · `M83` · `G1 E2 F300` · `G92 E<saved E>` · `M82`/`M83` · `G90`/`G91` · `G1 F<saved feed>` | Reheat and wait; return at safe Z, then descend; un-retract/prime; restore the E reference and every modal state |
+
+  No `G28` appears anywhere; every phase ends with `M400` so the host acts only
+  on completed motion. On any error the nozzle target is restored (or set to 0
+  on an operator abort) and the print is left paused and resumable.
 - Print resumes; cap layers seal the magnet.
-- Verified end-to-end against a simulated printer + simulated dispenser; 44
-  automated tests pass. **No hardware run yet.**
+- Verified end-to-end against a simulated printer + simulated dispenser; **225
+  automated tests** pass, including a full-workflow test (slice → plan → save →
+  stream → sentinel → insert → resume → end of file) and the out-of-envelope
+  abort path. The **printer serial link has run on the real machine** (Ender-3
+  V3 SE over USB, 2026-09-09) and a real sliced part was streamed through the
+  host on 2026-09-15 — no magnet insert on hardware yet.
+- Note on this worked example: with the baseline offset the nozzle presses at
+  X30 Y60 Z1, which lies *inside* an 80 × 80 mm test coupon. The bed-limit check
+  passes, but the toolpath collision check (Q9 item 7) would reject it — the
+  pocket must sit within 30 mm of the part's −X edge for a pole-above-nozzle
+  applicator, or a deployable pole is needed (Q11).
 
 Broad workable parameter ranges: see Q21.
 
 ## 15. Experiments conducted / third-party validation
 
-**None on hardware yet.** Current validation is **software simulation only**
-(`SimPrinter` / `SimDispenser`, 44 `pytest` cases). Planned bench tests
-(`project/PROJECT_PLAN.md` §5): servo-alone; cold "air-insert"; magnet-near-bed
-attraction; nozzle idle-timeout; then a first coupon. `[Fill in results as they
-happen.]`
+**No magnet insert on hardware yet.** Validation so far:
+
+- **Software simulation** — `SimPrinter` / `SimDispenser`, 225 `pytest` cases
+  covering the parser, post-processor, streaming runner, every branch of the
+  insert state machine, the planner geometry, the UI mediator, and the serial
+  links driven by a fake port.
+- **Real printer, serial control** — 2026-09-09: the host connected to the
+  Ender-3 V3 SE over USB, completed the `M115` handshake and read position via
+  `M400`/`M114`. 2026-09-15: a real sliced part (46 layers, PETG) was streamed
+  through the host and printed; jog, home, temperature control and bed levelling
+  were exercised from the panel. This confirms the streaming/flow-control layer
+  on stock firmware; the sentinel path was not exercised on hardware.
+- **Not yet done** (`project/PROJECT_PLAN.md` §5): applicator build; servo-alone
+  test; cold "air-insert" of APPROACH/PRESS/SHEAR/LIFT; magnet-near-bed
+  attraction; nozzle idle-timeout; first coupon with a real magnet. `[Fill in
+  results as they happen.]`
+- No third-party validation.
 
 ## 16. Public disclosure / publication
 
-**None as of this draft.** The project exists only in a **private** git repository
-on the inventors' machine. **No** paper, poster, video, demo, sale, or public repo.
-`[If this changes, record the date and forum here and tell the K&K agent
-immediately — it affects filing deadlines and foreign rights.]`
+**None as of this draft (re-confirmed 2026-09-16).** The project exists in a
+git repository on the inventors' machine with a remote at
+`github.com/KL-Mithunvel/Creality-Ender-3-V3-SE-`, which the owner confirms is
+**private** (not publicly visible). **No** paper, poster, video, demo, sale, or
+public repo. `[If this changes, record the date and forum here and tell the K&K
+agent immediately — it affects filing deadlines and foreign rights. Keep the
+repository private until the agent clears publication.]`
 
 ## 17. Stage / level of development
 
-**Early.** Concept fully formulated and specified; control software for the printer
-side partially built and validated **in simulation**; mechanism (magazine/
-escapement/pole) designed on paper, **not built**; **no hardware validation**.
-→ "Basic conceptualization stage", moving toward experimental proof of concept.
-(See Q26 — TRL 2–3.)
+**Early, with the control software complete.** Concept fully formulated and
+specified; the host software (streaming, sentinel, insert state machine,
+planner/preview, control panel, run logging, calibration aids) is **complete
+for the operator-assisted phase and validated in simulation**; the printer
+control layer is **validated on the real printer** (serial control and a real
+print streamed through the host). The mechanism (magazine / escapement /
+holding pole / mount) is designed on paper, **not built**; the Arduino sketch is
+not written; **no magnet insert has been performed on hardware**.
+→ Between "basic conceptualization" and "experimental proof of concept". (See
+Q26 — TRL 3, partial.)
 
 ## 18. Aspects to claim / monopolise (proposed claims — for the agent to draft)
 
@@ -390,10 +484,26 @@ Indicative directions only:
    homing during the print**, with each phase gated by a finish-moves command.
 6. An **apparatus**: a clip-on FFF applicator whose only actuator is a
    single-component dispenser, relying on the host + printer motion for placement.
-7. Dependent claims: escapement isolating one magnet against mutual attraction;
-   standby-temperature and retract handling during the pause; operator
-   confirm/retry loop; multi-marker / multi-insert; adhesive-assisted retention;
-   passive stripper variant; non-magnet components.
+7. The method of claim 4 where the check further derives the **footprint and
+   local height of the partly-printed part from the toolpath being streamed**
+   and rejects any press or release move that would place the printer's own
+   nozzle (or applicator body) inside that part.
+8. The method where the host **withholds firmware pause commands** present in
+   the toolpath and performs its own pause/insert/resume in their place, such
+   that one toolpath file supports both manual insertion when printed
+   standalone and automated insertion when streamed.
+9. The method where the operator-facing planning step **computes, displays and
+   checks the placement motion with the same function that later commands
+   it**, and writes the marker into the toolpath.
+10. The apparatus of claim 6 where the holding feature is **deployable** between
+    a retracted position clear of normal printing and a deployed position below
+    the nozzle tip, actuated by the same dispenser actuator, by a passive
+    engagement the printer's motion performs, or by a second actuator.
+11. Dependent claims: escapement isolating one magnet against mutual attraction;
+    standby-temperature and retract handling during the pause; operator
+    confirm/retry loop with dispenser reset; multi-marker / multi-insert;
+    adhesive-assisted retention; passive stripper variant; non-magnet
+    components; pocket positioned within the offset distance of a part edge.
 
 ## 19. Novelty / inventiveness search done?
 
@@ -432,12 +542,13 @@ to add their own reasoning; agent to test against the search.]`
 | Magnet thickness | 1–5 mm | `[TBD]` |
 | Pocket clearance (per side) | +0.05 to +0.30 mm | `[TBD]` |
 | Cap layers over magnet | 2–8 | `[TBD]` |
-| Tool offset X/Y | any, subject to reachable envelope | 30 / 0 mm |
-| Tool offset Z (pole vs nozzle tip) | −5 to +15 mm | +5 mm |
-| Safe Z lift before travel | 5–30 mm | 15 mm |
+| Tool offset X/Y | any, subject to reachable envelope; the reachable pole area is the bed minus a border of the offset on two sides | 30 / 0 mm |
+| Tool offset Z (pole tip − nozzle tip; **+ = pole above nozzle**) | −10 to +15 mm. Positive: pocket must be within the X/Y offset of a part edge or a deployable pole is used (Q11). Negative: any pocket reachable, pole must deploy/retract. | +5 mm |
+| Safe Z lift before travel (above the paused print height) | 5–30 mm; must clear the applicator body over the tallest printed feature | 15 mm |
 | Retract before pause | 1–6 mm @ 1200–3000 mm/min | 3 mm @ 2400 |
 | Standby nozzle temp during pause | (soften pt) to (print − 20 °C), or fully off | 160 °C |
-| Press feed (Z into pocket) | 20–120 mm/min | 60 mm/min |
+| Press feed (Z into pocket) | 20–120 mm/min; press is **open-loop** (commanded depth, no force sensing) | 60 mm/min |
+| Press over-travel below the nominal seat (proposed parameter) | 0–0.3 mm | not yet implemented |
 | Press dwell | 100–1000 ms | 500 ms |
 | Shear distance | 2–10 mm | 5 mm |
 | Shear feed | 300–3000 mm/min | 1200 mm/min |
@@ -491,19 +602,34 @@ cost.
 
 ## 26. Technology Readiness Level
 
-**TRL 2–3.** TRL 2 (technology concept formulated) is met; TRL 3 (experimental
-proof of concept) is **partially** met — the control method is proven in software
-simulation but not yet with hardware. Not yet TRL 4 (lab validation).
+**TRL 3 (partial).** TRL 2 (technology concept formulated) is met; TRL 3
+(experimental proof of concept) is **partially** met — the control method is
+proven in software simulation, and the host-to-printer control layer (stock
+firmware, no modification) is proven on the real printer including a complete
+streamed print. The insertion mechanism itself has not been built or tested.
+Not yet TRL 4 (lab validation of the whole system).
 → Tick **TRL 2** and **TRL 3** (partial), Research phase.
 
 ## 27. Additional notes / remarks
 
-- The host software is complete for Phase 1 (`project/BUILD_PLAN.md`, chunks C1–C6):
-  config, simulated + real printer/dispenser links, sentinel parser + post-processor,
-  streaming runner, the full park→dispense→press→shear→resume insert state machine,
-  a Tkinter control panel, per-run logging — **94 automated tests**, validated in
-  simulation only. The physical mechanism (magazine / escapement / holding pole /
-  mount) and the Arduino sketch are **not yet built**; no hardware run has happened.
+- The host software is complete for the operator-assisted phase
+  (`project/BUILD_PLAN.md`, chunks C1–C24): config, simulated + real
+  printer/dispenser links, sentinel parser + post-processor, streaming runner
+  with firmware-pause substitution, the full park→dispense→press→shear→resume
+  insert state machine, a shared insert-geometry module, the insert planner
+  with live preview and animated motion, a Tkinter control panel with a live
+  print view, bed-levelling and Z-offset calibration aids, and per-run logging —
+  **225 automated tests**. The printer control layer has been exercised on the
+  real Ender-3 V3 SE (serial handshake 2026-09-09; a full real print streamed
+  2026-09-15). The physical mechanism (magazine / escapement / holding pole /
+  mount) and the Arduino sketch are **not yet built**; no magnet insert has
+  been performed on hardware.
+- Known design issue recorded 2026-09-16 and reflected in Q9/Q11/Q18/Q21: with
+  the pole tip above the nozzle, the nozzle can be driven into the printed part
+  during PRESS unless the pocket is near a part edge. The planned fix is a
+  toolpath-derived collision check plus the deployable-pole embodiment; both
+  are disclosed here so they are covered regardless of which the prototype
+  adopts.
 - Reference material and prior-art notes: **`project/RESEARCH.md`** (comprehensive)
   and `project/BUILD_PLAN.md` → References (protocol-focused).
 - **Before any public disclosure or repo publication, consult the K&K agent** (see

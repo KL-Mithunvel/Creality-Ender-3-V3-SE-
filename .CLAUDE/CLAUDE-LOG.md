@@ -782,3 +782,79 @@ smoke test.
   section, including the second screenshot-mishap note), `README.md`,
   `.CLAUDE/CLAUDE.md` (status line, module table rows, `ui/panel.py` Key
   Modules section rewritten for the two-column layout).
+
+## 2026-09-16 (cont.) — Approach + GUI review; patent draft refreshed; collision gap found
+
+- Owner asked for a full-context review: what to improve in approach and
+  capability, a pass over the patent draft, and a look at the running GUI
+  with UI/UX and accessibility in mind. Review only, then docs — no code.
+- **GUI actually rendered this time without touching the shared screen:**
+  drove the real `ControlPanel` + `Controller` + sim links in-process and
+  rendered *our own* window handles via Win32 `PrintWindow`
+  (`GetAncestor(winfo_id, GA_ROOT)` → `PrintWindow(hwnd, dc,
+  PW_RENDERFULLCONTENT)` → `GetDIBits` → PNG in the scratchpad). Unlike the
+  two earlier screen-grab attempts, this can only ever contain the window we
+  created. Captured the main panel (fresh, loaded, running at the sentinel,
+  done; Global and Local 3D), the Plan dialog, Settings, Z-offset dialog, the
+  Animate preview and the Success/Retry/Abort prompt. Screenshots deleted
+  with the scratchpad; nothing added to the repo.
+- **Biggest finding — a real collision gap (Dev Rule 7/12).**
+  `check_envelope` tests bed limits only. With the default offset (pole 5 mm
+  *above* the nozzle, 30 mm in +X) PRESS sends the nozzle to
+  `seat_z − 5` at `pocket − 30` in X — inside the part unless the pocket is
+  near an edge. Reproduced numerically on `tests/data/sample.gcode`: nozzle
+  target X30 Y60 Z1.0 inside an 80 × 80 mm coupon printed to Z 6, envelope
+  check returns `[]`, Plan dialog says "OK" while its own X–Z preview draws
+  the press line through the silhouette. Recorded in CLAUDE.md Known
+  Technical Debt (🔴), PROJECT_PLAN §6, TODO, and the disclosure draft.
+- Other approach findings recorded as debt/TODO: no Emergency Stop and no
+  safe-cancel (heaters stay on, head stays put); Home/Level Bed/Z Calibrate
+  block the Tk main thread; `connect` not idempotent + no Disconnect; insert
+  sequence invisible while running (no phase callback, live view frozen at
+  the sentinel line); plain-line streaming has no resend recovery; opt-in
+  `M420 S1` re-send after `G28` still unbuilt; Plan dialog defaults seat Z to
+  the part top; "run finished" logs a raw dict.
+- GUI/UX findings (from the renders): left column empty below ~60 % height;
+  3D view mostly blank in Global mode with overlapping Z tick labels; no
+  phase-colour legend anywhere; gray-on-gray captions below WCAG contrast;
+  Settings and Z-cal dialog text double-wrapped (embedded newlines +
+  `wraplength`); width-4 jog buttons, no arrow-key jog, no tooltips/shortcuts;
+  Pause and Resume as two buttons; Abort beside Success and Cancel
+  unconfirmed; one default font, no hierarchy. All listed in `TODO.md` as a
+  future UX pass.
+- **Patent draft (`docs/INVENTION_DISCLOSURE_DRAFT.md`) updated**, owner
+  approved all seven items: Q14/Q15/Q17/Q26/Q27 brought to the real state
+  (225 tests, serial link + real print verified on hardware, magnet flow
+  still sim-only); Q7 gained B10 (planner/preview, preview-equals-execution)
+  and B11 (firmware-pause substitution); Q8 notes the collision check; Q9
+  gained items 7–9 (toolpath collision check, pause substitution,
+  preview-equals-execution); Q11 gained the offset-Z-sign trade-off,
+  deployable-pole variants and the pocket-near-edge variant; Q14's worked
+  example is now the actual per-phase G-code table lifted from
+  `insert_magnet.py` plus a note that the baseline example itself collides;
+  Q18 gained claims 7–10; Q21 gained offset-Z sign/ranges, safe-lift
+  clearance, open-loop press + proposed over-travel; Q16 re-confirmed
+  2026-09-16 — owner states the GitHub remote is private (an
+  unauthenticated API probe returned 403, inconclusive, so the owner's word
+  is the record).
+- Doc fixes in the same commit: `project/PROJECT_PLAN.md` line 116 said
+  `seat_z + offset.z` (wrong sign vs. code/CLAUDE.md, fixed + explained);
+  `project/BUILD_PLAN.md` C2 acceptance line had the same sign; stale test
+  counts in PROJECT_PLAN (94), HOW_IT_WORKS (94) and CLAUDE.md debt (185)
+  → 225. `python -m pytest` 225/225 before and after (docs only).
+- Owner added three asks mid-session, recorded in `TODO.md`: (1) fewer
+  Tkinter windows — the separate Toplevels (Plan, Animate, 3D, Settings,
+  Z-cal), each with its own matplotlib canvas, may be why the system feels
+  slow; likely contributors are the Animate window's 40 ms tick and the main
+  panel's full `Axes3D` redraw every 150 ms during a run → fold into a
+  `ttk.Notebook`, redraw only visible tabs, profile the 3D redraw; (2) the
+  3D live view does not move during the magnet-insert phase — confirmed
+  cause is line-progress-derived position freezing at the sentinel → drive
+  the markers from `plan_insert_moves` via the `on_phase` callback; (3) the
+  insert planner/runtime must raise explicit errors for any motion that
+  could damage the printer or part — nozzle into the build plate, nozzle or
+  applicator into the printed part, pocket outside the bed, impossible
+  coordinates — same check feeding the dialog and the run.
+- Not done (owner to choose next): the C25 fix chunk — collision/damage
+  checks in `geometry.check_envelope` + Emergency Stop first, then the
+  insert-phase live view, then the window/performance and UX pass.

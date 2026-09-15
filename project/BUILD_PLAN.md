@@ -147,7 +147,8 @@ sequence with a `--confirm` canned answer.
 - Park before any XY travel; nozzle set to `standby_nozzle_temp_c`.
 - `dispenser.dispense()` called once (or the prompt, if no dispenser).
 - APPROACH target == `pocket_xy − magnet_tool_offset.xy`; PRESS Z ==
-  `seat_z + magnet_tool_offset.z`; SHEAR == lateral `shear.distance` along `shear_dir`.
+  `seat_z − magnet_tool_offset.z` (offset = pole tip − nozzle tip; corrected in
+  C2); SHEAR == lateral `shear.distance` along `shear_dir`.
 - RESUME returns X/Y/Z to the saved values, restores `G90`/`M82`/feedrate, un-retracts.
 - Out-of-envelope target → `OutOfEnvelopeError`, no motion commanded, print still paused.
 - `prompt` returns `"retry"` → machine re-runs from DISPENSE; `"abort"` → heaters

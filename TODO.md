@@ -14,6 +14,42 @@ criteria, risks). Architecture and rules: `.CLAUDE/CLAUDE.md`. Keep all three in
       value once and set `zcal.probe_z_offset` in `config.local.yaml` before the first run)
 - [ ] Patent: fill the `[INVENTORS TO COMPLETE]` sections of `docs/INVENTION_DISCLOSURE_DRAFT.md`,
       run a prior-art search with the K&K agent, confirm college IP policy
+- [ ] 🔴 **Collision check (Dev Rule 7/12):** extend `sequences/geometry.check_envelope` with a
+      toolpath-derived part footprint/height test so PRESS/SHEAR can never put the nozzle
+      inside the printed part (reproduced on `tests/data/sample.gcode` — planner says OK
+      for nozzle X30 Y60 Z1 inside the part). Decide deployable pole vs. pocket-near-edge.
+      See `.CLAUDE/CLAUDE.md` → Known Technical Debt, `project/PROJECT_PLAN.md` §6.
+- [ ] 🔴 **Damage-prevention errors in the magnet-insert planner and runtime (owner ask,
+      2026-09-16):** refuse, with a clear error in the Plan dialog *and* at run time, any
+      insert whose motion could damage the printer or part — nozzle below the build plate
+      (`press_z < 0` is already caught; make the message say "nozzle would hit the plate"),
+      nozzle or applicator body inside the printed part (the collision check above), pocket
+      XY outside the bed even when the nozzle target is inside, safe Z above `z_max`, and
+      non-numeric / impossible coordinates. Same function feeds dialog + run (Dev Rule 12).
+- [ ] 3D live view does not move during the magnet-insert phase (owner-observed): position
+      is derived from G-code line progress, which freezes at the sentinel. Drive the 3D and
+      2D markers from the planned insert waypoints (`plan_insert_moves`) while `_in_insert`,
+      via the `on_phase` callback; also animate the Animate window's "Open 3D view" (static today)
+- [ ] Performance / window sprawl (owner-observed "system feels slow"): Plan, Animate, 3D,
+      Settings, Z-cal each open a separate Toplevel with its own matplotlib canvas, and the
+      Animate window redraws every 40 ms while open; the main panel redraws two canvases
+      (one full `Axes3D` redraw) every 150 ms during a run. Fold the dialogs into a
+      `ttk.Notebook` in the main window (one figure per tab, created lazily, redraw only
+      when visible), stop the Animate tick when not playing, and profile the 3D
+      `draw_idle` — consider redrawing 3D at a slower rate than 2D or blitting
+- [ ] Safety: Emergency Stop (`M112`, bypasses the printer lock) + a configurable safe-cancel
+      routine (retract, lift, park, heaters off); run Home/Level Bed/Z Calibrate off the Tk
+      main thread so the panel stays clickable
+- [ ] Panel: Connect ↔ Disconnect toggle, guard double-connect; `on_phase` callback from
+      `insert_magnet` → log + phase badge + planned-path overlay during an insert
+- [ ] Streaming reliability for long real prints: `N` line numbers + checksum + resend buffer;
+      opt-in `M420 S1` re-send after any streamed `G28`
+- [ ] GUI/UX pass (from the 2026-09-16 screenshot review): fill the empty left column, default
+      the 3D view to Local + cap Z ticks, phase-colour legend in Plan/Animate, WCAG-contrast
+      captions, fix double-wrapped dialog text, larger jog targets + arrow-key jog + tooltips,
+      Pause/Resume as one toggle, separate/confirm destructive actions, `ttk.Style` font +
+      semantic status colours, human-readable "run finished" line, Plan dialog seat-Z default
+      below the insert layer
 
 ## Done
 
@@ -53,6 +89,11 @@ criteria, risks). Architecture and rules: `.CLAUDE/CLAUDE.md`. Keep all three in
       (`main.py --preview`); C17 `ui/plan_dialog.py` (place sentinel + save
       `*.magnet.gcode`); C18 idle poll + extrude/retract + progress bar;
       C19 end-to-end workflow test + `GcodeRunner` drops `M0`/`M1`/`M25`/`M600`/`M601`.
+- [x] Patent draft refresh (2026-09-16): stage/validation/test counts updated, B10/B11
+      components, actual per-phase G-code as the worked example, collision-aware check +
+      pause-substitution + preview-equals-execution as claim directions, deployable-pole and
+      pocket-near-edge embodiments, offset-Z sign/press over-travel in the ranges table,
+      repo confirmed private for Q16.
 - [x] Write `project/HOW_IT_WORKS.md` (plain-language system walkthrough).
 - [x] Draft `docs/INVENTION_DISCLOSURE_DRAFT.md` from the K&K form (27 answers + gaps marked).
 
