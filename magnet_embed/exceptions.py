@@ -60,7 +60,9 @@ class DispenserError(MagnetEmbedError):
 # --- insert sequence -------------------------------------------------
 
 class OutOfEnvelopeError(MagnetEmbedError):
-    """A computed move target lies outside the machine limits."""
+    """The planned insert would be unsafe: a target outside the machine limits,
+    a press into the build plate, or a press/shear into the printed part
+    (`sequences.geometry.check_envelope`). Raised before any motion."""
 
 
 class SequenceAborted(MagnetEmbedError):

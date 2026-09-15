@@ -46,7 +46,7 @@ class PreviewWindow(tk.Toplevel):
             if self.saved is None:
                 self.saved = tf.state_at_z(toolpath, mi.seat_z)
             self.moves = tf.plan_for(mi, self.cfg, self.saved)
-            self.bad = check_envelope(mi, self.cfg, self.saved)
+            self.bad = check_envelope(mi, self.cfg, self.saved, toolpath)
 
         start_layer = toolpath.layer_for_z(mi.seat_z) if mi else 0
         self.layer = tk.IntVar(value=start_layer)
@@ -91,8 +91,9 @@ class PreviewWindow(tk.Toplevel):
             self.phase_lbl.pack(side="left")
             if self.bad:
                 ttk.Label(
-                    self, text="OUT OF ENVELOPE — " + "; ".join(self.bad),
-                    foreground="#c23a3a", padding=(6, 0, 6, 6),
+                    self, text="UNSAFE — " + "; ".join(self.bad),
+                    foreground="#c23a3a", padding=(6, 0, 6, 6), wraplength=880,
+                    justify="left",
                 ).pack(fill="x")
 
         ttk.Button(self, text="Open 3D view", command=self._open_3d).pack(

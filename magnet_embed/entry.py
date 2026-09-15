@@ -108,12 +108,21 @@ def run_headless(
     """
     from .exceptions import MagnetEmbedError
     from .gcode.runner import GcodeRunner
+    from .gcode.toolpath import parse_toolpath
     from .sequences.insert_magnet import insert_magnet
     from .state import MagnetInsert
 
     printer.connect()
     if dispenser is not None:
         dispenser.connect()
+
+    # Same best-effort parse the panel does in `Controller.load_gcode` - the
+    # insert's collision guard needs the part footprint (Dev Rule 7).
+    try:
+        toolpath = parse_toolpath(gcode)
+    except Exception as exc:  # noqa: BLE001 - the guard degrades to bed limits only
+        log.warning("no toolpath for the collision guard (%s)", exc)
+        toolpath = None
 
     def on_sentinel(mi: MagnetInsert) -> None:
         log.info(
@@ -123,6 +132,7 @@ def run_headless(
         insert_magnet(
             printer, dispenser, mi, config,
             lambda stage: confirm if stage == "confirm" else "ready",
+            toolpath=toolpath,
         )
 
     runner = GcodeRunner(printer, gcode, on_sentinel, config)

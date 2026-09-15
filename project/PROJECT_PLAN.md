@@ -5,7 +5,7 @@
 | Owner | kl mithunvel |
 | Created | 2026-09-09 |
 | Updated | 2026-09-16 |
-| Status | Phase 1 software complete through C24 (225 tests, see `project/BUILD_PLAN.md`); printer serial link + a real streamed print verified on hardware. Phase 0 (mechanical) and the magnet-flow hardware work not started. **Open design issue:** nozzle-vs-part collision during PRESS with a pole-above-nozzle offset — see §6. |
+| Status | Phase 1 software complete through C25 (245 tests, see `project/BUILD_PLAN.md`); printer serial link + a real streamed print verified on hardware. Phase 0 (mechanical) and the magnet-flow hardware work not started. **Open design decision:** with a pole-above-nozzle offset the pocket must sit near a part edge (the C25 guard enforces it) — deployable pole or pocket constraint, see §6. |
 | Full brief | `.CLAUDE/CLAUDE.md` |
 | Task tracker | `TODO.md` |
 | Session history | `.CLAUDE/CLAUDE-LOG.md` |
@@ -259,17 +259,16 @@ the printer-driven press + lateral shear on real parts.
   from config, and **aborts the sequence (print paused) if out of range** — it never
   commands an out-of-bounds move (Dev Rule 12).
 - Keep the magnet pocket well inside the reachable area at design time.
-- **Nozzle-vs-part collision (found 2026-09-16, not yet fixed).** The envelope
-  check only tests bed limits. With the pole tip *above* the nozzle (`offset.z`
-  positive, the current default) the nozzle presses to `seat_z − offset.z`, i.e.
-  *below* the seat, at a point `offset.xy` away from the pocket — inside the
-  part unless the pocket is within the offset distance of a part edge. On
-  `tests/data/sample.gcode` the planner reports OK for a nozzle target of
-  X30 Y60 Z1 inside an 80 × 80 mm coupon printed up to Z 6. Fix: extend
-  `sequences/geometry.check_envelope` with a toolpath-derived footprint/height
-  check (bbox first, per-layer occupancy later), and decide the applicator
-  variant — pocket-near-edge constraint, or a deployable pole (Q11 of the
-  disclosure draft). Tracked in `TODO.md`.
+- **Nozzle-vs-part collision (found 2026-09-16, guarded since C25).** With
+  the pole tip *above* the nozzle (`offset.z` positive, the current default)
+  the nozzle presses to `seat_z − offset.z`, i.e. *below* the seat, at a point
+  `offset.xy` away from the pocket — inside the part unless the pocket is
+  within the offset distance of a part edge. `sequences/geometry.check_envelope`
+  now refuses that (toolpath bounding-box footprint + `collision.*` clearance
+  and margin) in the Plan dialog, the preview, and the run — so the software
+  is safe, but the **design decision is still open**: constrain pockets to
+  within `|offset.x|`/`|offset.y|` of a part edge, or build a deployable pole
+  (Q11 of the disclosure draft). Tracked in `TODO.md`.
 
 ---
 
@@ -282,7 +281,9 @@ the printer-driven press + lateral shear on real parts.
 | Holding pole stronger than pocket retention | Shear drags the magnet back out | Press-fit pocket + weak pole + optional adhesive; lateral (not vertical) shear; tune on coupons (§8) |
 | Magazine clumps, dispenses 0 or 2 | Missed or doubled insert | Escapement isolates one; `DISPENSE`→`ERR` if the servo can't complete; operator check catches it |
 | Magnet snaps to the steel flex plate | Magnet lost / plate lifts | Pole holds the magnet until shear; measure safe approach distance in Phase 0/2 |
-| Tool offset target out of envelope | Bad move / crash | Host envelope check aborts the sequence, print stays paused (Dev Rule 12) |
+| Tool offset target out of envelope | Bad move / crash | Host damage guard aborts the sequence, print stays paused (Dev Rule 12) |
+| Nozzle driven into the printed part during PRESS/SHEAR (pole above nozzle) | Nozzle-through-part crash | C25 guard refuses it in the dialog, preview and run; pocket must sit near a part edge or the pole must deploy (§6) |
+| Runaway during a move / insert | Damage to printer or part | Red EMERGENCY STOP (`M112`, no lock, no idle guard); power-cycle + reconnect afterwards. `EMERGENCY_PARSER` on the stock board unverified |
 | Over-deep `PRESS` | Z skips / part damage | Conservative `seat_z`, slow `press.feed`, dwell then retract; tune on coupons |
 | V3 SE idle-heater timeout during the pause | Host stalls on resume reheat | Phase 2 test 2.7(d); send `M105` keepalive or re-assert temps |
 | Creality serial quirks (`ok` handling, no temp autoreport) | Host stalls | Use `printrun.printcore`; `wait_ok` has a timeout + `AckTimeout` |

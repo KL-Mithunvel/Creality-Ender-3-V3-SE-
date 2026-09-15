@@ -11,7 +11,7 @@ from __future__ import annotations
 import time
 from collections import deque
 
-from ..exceptions import AckTimeout, PrinterConnectionError
+from ..exceptions import AckTimeout, PrinterConnectionError, PrinterError
 from ..gcode.util import parse_words, strip_comment
 from ..state import PrinterState
 from .base import PrinterLink
@@ -38,6 +38,7 @@ class SimPrinter(PrinterLink):
         self._acks: deque[str] = deque()
         self.sent: list[str] = []      # every line received, verbatim
         self.moves: list[_Move] = []   # (x, y, z, e) after each move/home
+        self.halted = False            # set by M112, cleared by M999 (like Marlin)
 
     # --- PrinterLink -----------------------------------------------------
 
@@ -52,8 +53,14 @@ class SimPrinter(PrinterLink):
             raise PrinterConnectionError("SimPrinter.send_line() before connect()")
         if self._delay:
             time.sleep(self._delay)
+        code = strip_comment(line).strip()
+        head = code.split()[0].upper() if code else ""
+        if self.halted and head != "M999":
+            # a real Marlin board answers nothing useful after M112 until it is
+            # reset; surface that as the same error type the serial link would
+            raise PrinterError("printer halted by M112 - send M999 or power-cycle, then reconnect")
         self.sent.append(line)
-        self._execute(strip_comment(line).strip())
+        self._execute(code)
         self._acks.append(self._ok_payload())
 
     def wait_ok(self, timeout_s: float | None = None) -> str:
@@ -104,6 +111,12 @@ class SimPrinter(PrinterLink):
             if "S" in w:
                 s.bed_target = w["S"]
                 s.bed_temp = w["S"]
+        elif head == "M112":
+            # emergency stop: heaters + steppers off, firmware halts until reset
+            s.nozzle_target = s.bed_target = 0.0
+            self.halted = True
+        elif head == "M999":
+            self.halted = False
         # M105 / M114 / M115 / M155 / M400 / everything else: nothing to model,
         # but the line is still acknowledged.
 

@@ -71,3 +71,12 @@ def test_envelope_report_flags_a_pocket_off_the_bed(cfg):
 def test_envelope_report_clean_for_a_central_pocket(cfg):
     tp = parse_toolpath(DATA / "cura_sample.gcode")
     assert envelope_report(MI(), cfg, tp) == []
+
+
+def test_envelope_report_flags_nozzle_into_the_part(cfg):
+    """C25: the dialog runs the same collision guard as the run. The cura
+    coupon spans X 0..50; a pocket at X30 with a +20 mm offset puts the nozzle
+    at X10, inside the part, pressing to Z 4 below the printed top."""
+    tp = parse_toolpath(DATA / "cura_sample.gcode")
+    bad = envelope_report(MI(pocket_x=30.0, pocket_y=30.0), cfg, tp)
+    assert any("printed part" in b for b in bad)

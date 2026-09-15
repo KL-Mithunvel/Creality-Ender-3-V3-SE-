@@ -83,6 +83,22 @@ def test_out_of_envelope_aborts_before_moving(printer, dispenser, cfg):
     assert dispenser.count == 0
 
 
+def test_nozzle_vs_part_collision_aborts_before_moving(printer, dispenser, cfg):
+    """C25: the printed part spans the nozzle's press point -> refused, no motion."""
+    from magnet_embed.gcode.toolpath import Toolpath
+
+    part = Toolpath(segments=[], layer_z=[5.0], bbox_min=(50.0, 50.0, 0.2),
+                    bbox_max=(150.0, 150.0, 5.0))
+    before = printer.query_state()
+    sent_before = list(printer.sent)
+    with pytest.raises(OutOfEnvelopeError, match="printed part"):
+        insert_magnet(printer, dispenser, MI(), cfg, always("success"), toolpath=part)
+    after = printer.query_state()
+    assert (after.x, after.y, after.z) == (before.x, before.y, before.z)
+    assert printer.sent == sent_before          # not a single line went out
+    assert dispenser.count == 0
+
+
 def test_abort_at_confirm_turns_nozzle_off(printer, dispenser, cfg):
     with pytest.raises(SequenceAborted):
         insert_magnet(printer, dispenser, MI(), cfg, always("abort"))

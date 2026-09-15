@@ -57,9 +57,12 @@ def save_magnet_gcode(
 
 
 def envelope_report(mi: MagnetInsert, config: dict, toolpath: Toolpath) -> list[str]:
-    """Envelope check using the printer state approximated at the seat height."""
+    """Damage-guard report (bed limits, build plate, nozzle-vs-part collision)
+    using the printer state approximated at the seat height - the same
+    `check_envelope` the run itself calls, so the dialog can't say OK to a
+    plan the run would refuse."""
     saved = tf.state_at_z(toolpath, mi.seat_z)
-    return check_envelope(mi, config, saved)
+    return check_envelope(mi, config, saved, toolpath)
 
 
 # --- dialog ------------------------------------------------------------
@@ -167,7 +170,7 @@ class PlanInsertDialog(tk.Toplevel):
         bad = envelope_report(mi, self.c.config, self.tp)
         self._redraw_embedded_preview(mi)
         if bad:
-            self.status.configure(text="OUT OF ENVELOPE — " + "; ".join(bad),
+            self.status.configure(text="UNSAFE — cannot save:\n• " + "\n• ".join(bad),
                                   foreground="#c23a3a")
             self.btn_save.configure(state="disabled")
             return None

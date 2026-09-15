@@ -72,6 +72,11 @@ class Controller:
         # concurrently with that (Dev Rule 6: the sequence owns the heaters
         # during the pause).
         self._in_insert = False
+        # True while the worker is blocked in `_prompt()` waiting for the
+        # operator - `emergency_stop` uses it to know whether an "abort"
+        # answer is needed to unblock the worker.
+        self._prompt_pending = False
+        self._estopped = False
 
     # --- state -------------------------------------------------------
 
@@ -82,6 +87,12 @@ class Controller:
     @property
     def connected(self) -> bool:
         return self._connected
+
+    @property
+    def estopped(self) -> bool:
+        """True after `emergency_stop()` sent `M112` - the printer needs a
+        reset (`M999` or a power-cycle) and a reconnect before anything else."""
+        return self._estopped
 
     @property
     def link_summary(self) -> str:
@@ -152,6 +163,7 @@ class Controller:
                 )
                 self.dispenser = None
         self._connected = True
+        self._estopped = False
         self._emit("log", "connected")
         self._emit_state()
 
@@ -247,8 +259,8 @@ class Controller:
         """Poll temps + position. No-op when disconnected or mid-insert; safe to
         call during a normal print (locked against the streaming loop) since it
         only reads (`M105`/`M400`/`M114`), same reasoning as `set_temp`."""
-        if not self._connected or self._in_insert:
-            return
+        if not self._connected or self._in_insert or self._estopped:
+            return                     # estopped: a halted board would fail every poll
         with self._printer_lock:
             try:
                 self.printer.command("M105")
@@ -398,6 +410,43 @@ class Controller:
     def answer_prompt(self, value: str) -> None:
         self._answers.put(value)
 
+    def emergency_stop(self) -> None:
+        """Send `M112` (Marlin emergency stop: heaters + steppers off, firmware
+        halts until reset) *immediately* - no idle guard, no printer lock, no
+        `ok` wait - and stop the run. Allowed at any time, including mid-stream
+        and mid-insert; that is the whole point.
+
+        Why no lock: the streaming worker may be holding `_printer_lock`
+        inside `wait_ok` for up to `ack_timeout_s`; an emergency stop cannot
+        wait for that. Marlin reads `M112` ahead of the command queue when
+        `EMERGENCY_PARSER` is enabled (stock V3 SE firmware: unverified - if
+        not, it still executes as the next queued command). Any `ok` the
+        printer sends for it may be consumed by the worker's in-flight
+        `wait_ok`; harmless, since the run is being cancelled anyway.
+
+        After this the printer needs `M999` or a power-cycle, then Connect
+        again (`estopped` is cleared by `connect()`).
+        """
+        if self.runner is not None:
+            self.runner.cancel()
+        if self._prompt_pending:
+            self._answers.put("abort")       # unblock a worker waiting on the operator
+        try:
+            self.printer.send_line("M112")
+        except Exception as exc:  # noqa: BLE001 - an e-stop must never raise out of a button
+            self._emit(
+                "error",
+                f"EMERGENCY STOP: could not send M112 ({type(exc).__name__}: {exc}) - "
+                "use the printer's power switch",
+            )
+            return
+        self._estopped = True
+        self._emit(
+            "error",
+            "EMERGENCY STOP sent (M112): printer halted, heaters and motors off. "
+            "Power-cycle the printer (or send M999), then Connect again before continuing.",
+        )
+
     # --- worker thread ------------------------------------------
 
     def _run(self) -> None:
@@ -425,15 +474,22 @@ class Controller:
         )
         self._in_insert = True
         try:
-            insert_magnet(self.printer, self.dispenser, mi, self.config, self._prompt)
+            insert_magnet(
+                self.printer, self.dispenser, mi, self.config, self._prompt,
+                toolpath=self.toolpath,      # enables the nozzle-vs-part collision guard
+            )
         finally:
             self._in_insert = False
         self._emit("log", "insert sequence complete")
         self._emit_state()
 
     def _prompt(self, stage: str) -> str:
-        self._emit("prompt", stage)
-        return self._answers.get()
+        self._prompt_pending = True
+        try:
+            self._emit("prompt", stage)
+            return self._answers.get()
+        finally:
+            self._prompt_pending = False
 
     # --- helpers -----------------------------------------------
 

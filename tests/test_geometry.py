@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import pytest
 
+from magnet_embed.gcode.toolpath import Toolpath
 from magnet_embed.sequences.geometry import (
     check_envelope,
     compute_targets,
+    part_footprint,
     plan_insert_moves,
     pole_point,
 )
@@ -72,3 +74,64 @@ def test_envelope_flags_a_pocket_off_the_bed(cfg):
 def test_envelope_flags_negative_press_z(cfg):
     bad = check_envelope(MI(seat_z=1.0), cfg, _saved())   # 1 - offset.z 2 = -1
     assert any("press Z" in b for b in bad)
+    assert any("build plate" in b for b in bad)            # C25: says what would be hit
+
+
+# --- C25: damage guard ------------------------------------------------
+
+def _part(x0, y0, x1, y1, top):
+    """A toolpath stand-in: the guard only needs the printed bounding box."""
+    return Toolpath(segments=[], layer_z=[top], bbox_min=(x0, y0, 0.2), bbox_max=(x1, y1, top))
+
+
+def test_envelope_flags_a_pocket_off_the_bed_even_if_the_nozzle_is_on_it(cfg):
+    # pole 20 mm +X of the nozzle: pocket at X230 puts the nozzle at X210 (legal)
+    bad = check_envelope(MI(pocket_x=230.0), cfg, _saved())
+    assert any("pocket X" in b and "outside the bed" in b for b in bad)
+
+
+def test_envelope_flags_nozzle_into_the_printed_part(cfg):
+    # part spans X 50..150; pocket at X110 -> nozzle at X90, inside; press Z 4 < top 5 + 1
+    part = _part(50, 50, 150, 150, top=5.0)
+    bad = check_envelope(MI(), cfg, _saved(z=5.0), part)
+    assert len(bad) == 1
+    assert "printed part" in bad[0] and "PRESS" in bad[0]
+
+
+def test_envelope_ok_when_the_nozzle_lands_outside_the_footprint(cfg):
+    # part spans X 100..150 (+2 mm margin -> 98..152); nozzle at X90 and shear to X95 stay clear
+    part = _part(100, 50, 150, 150, top=5.0)
+    assert check_envelope(MI(), cfg, _saved(z=5.0), part) == []
+
+
+def test_envelope_flags_a_shear_that_crosses_into_the_part(cfg):
+    # nozzle presses at X90 just outside a part starting at X93 (margin 2 -> 91),
+    # then shears +X by 5 mm -> ends at X95, inside
+    part = _part(93, 50, 150, 150, top=5.0)
+    bad = check_envelope(MI(), cfg, _saved(z=5.0), part)
+    assert len(bad) == 1 and "SHEAR" in bad[0]
+
+
+def test_envelope_ok_when_the_nozzle_stays_above_the_part(cfg):
+    # pole 2 mm BELOW the nozzle: press Z = 6 + 2 = 8 >= printed top 5 + clearance 1
+    low_pole = {**cfg, "magnet_tool_offset": {**OFFSET, "z": -2.0}}
+    part = _part(50, 50, 150, 150, top=5.0)
+    assert check_envelope(MI(), low_pole, _saved(z=5.0), part) == []
+
+
+def test_envelope_clearance_is_configurable(cfg):
+    # press Z 4 vs top 3: clear with 0.5 mm clearance, not with 1.5 mm
+    part = _part(50, 50, 150, 150, top=3.0)
+    ok = {**cfg, "collision": {"nozzle_clearance_mm": 0.5, "footprint_margin_mm": 0.0}}
+    assert check_envelope(MI(), ok, _saved(z=3.0), part) == []
+    tight = {**cfg, "collision": {"nozzle_clearance_mm": 1.5, "footprint_margin_mm": 0.0}}
+    assert check_envelope(MI(), tight, _saved(z=3.0), part) != []
+
+
+def test_envelope_without_a_toolpath_only_checks_bed_limits(cfg):
+    assert check_envelope(MI(), cfg, _saved(z=5.0), None) == []
+
+
+def test_part_footprint_grows_by_the_margin():
+    part = _part(10, 20, 30, 40, top=5.0)
+    assert part_footprint(part, 2.0) == (8.0, 18.0, 32.0, 42.0)

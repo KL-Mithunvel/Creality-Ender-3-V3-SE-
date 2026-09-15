@@ -9,7 +9,7 @@ chunks. Each chunk: build → `pytest` green → stage → commit.
 |--|--|
 | Owner | kl mithunvel |
 | Created | 2026-09-09 |
-| Status | **C1–C8 + Phase 1.6 (C13–C19) + C20 + C21 + C22 + C23 + C24 done — 225 tests.** One root `python main.py` (mode by flag, opens maximized), bring-your-own-G-code, toolpath + insert-motion preview, "Plan magnet insert…" dialog (now with an embedded live preview of the insert motion), a two-column panel (jog/temperature/filament on the left, the live-print view + send-G-code + log on the right, both stretching to fill a maximized window) with a mode/port indicator, an embedded live-print view (2D current-layer + isometric 3D shown side by side, with a Global-bed/Local-part crop toggle and tight equal-scale axes — a path that grows as the nozzle passes through it — plus a nozzle marker and current-step G-code text) during a run, and a guided Z-offset calibration dialog. Magnet-flow hardware smoke test still pending the applicator build; the Z-calibration workflow is itself untested on real hardware — see Known Technical Debt. |
+| Status | **C1–C8 + Phase 1.6 (C13–C19) + C20 + C21 + C22 + C23 + C24 + C25 (collision guard + Emergency Stop) done — 245 tests.** One root `python main.py` (mode by flag, opens maximized), bring-your-own-G-code, toolpath + insert-motion preview, "Plan magnet insert…" dialog (now with an embedded live preview of the insert motion), a two-column panel (jog/temperature/filament on the left, the live-print view + send-G-code + log on the right, both stretching to fill a maximized window) with a mode/port indicator, an embedded live-print view (2D current-layer + isometric 3D shown side by side, with a Global-bed/Local-part crop toggle and tight equal-scale axes — a path that grows as the nozzle passes through it — plus a nozzle marker and current-step G-code text) during a run, and a guided Z-offset calibration dialog. Magnet-flow hardware smoke test still pending the applicator build; the Z-calibration workflow is itself untested on real hardware — see Known Technical Debt. |
 | Overall plan | `project/PROJECT_PLAN.md` |
 | Architecture / rules | `.CLAUDE/CLAUDE.md` |
 
@@ -950,7 +950,7 @@ its size... keep it side to side... isible in same screen."
   **224 tests.**
 - Manual: re-ran the introspection-driving script — confirms no exception on
   render (the numpy fix), the 3D path length grows monotonically as a
-  simulated run streams (`[0, 0, 0] … [12, 12, 12]` for the 12-move sample
+  simulated run streams (`[0, 0, 0] … [12, 12, 12]` for the then 12-move sample
   file), the final marker lands on the last move's endpoint, and
   `ax.get_box_aspect()` reflects the real X:Y:Z proportions (`[1.35, 1.35,
   0.05]` for the square-bed, thin sample part — not stretched to `[1,1,1]`).
@@ -1014,6 +1014,66 @@ actually raised and the grab captured the owner's IDE again. Deleted
 immediately; screen capture is not attempted again on this shared desktop for
 any reason - introspection-driving (withdrawn root, real objects, state read
 back programmatically) is the verification method going forward.
+
+---
+
+## Phase 1.12 — Damage guard + Emergency Stop
+
+### C25 — Nozzle-vs-part collision guard, damage-prevention errors, Emergency Stop  ✅
+
+**Why.** The 2026-09-16 review found that `check_envelope` only tested bed
+limits: with the default pole-above-nozzle offset the sample plan drove the
+nozzle to X30 Y60 Z1 *inside* an 80 × 80 mm part and the Plan dialog said OK.
+Owner asked for explicit errors whenever a move could damage the printer or
+part (nozzle into the plate, nozzle into the part, impossible coordinates),
+and the review flagged that there was no emergency stop at all.
+
+**Done:**
+- `sequences/geometry.py` — `check_envelope(mi, config, saved, toolpath=None)`
+  is now the single damage guard: (1) pocket XY on the bed; (2) approach/shear
+  XY + safe Z inside `machine.*` (messages say "nozzle" and that the offset
+  pushed it out); (3) `press_z < 0` → "nozzle would hit the build plate";
+  (4) with the toolpath, `_part_collisions`: nozzle at PRESS or at 10 sampled
+  points along SHEAR inside `part_footprint` (bbox + `collision.
+  footprint_margin_mm`) while `press_z < saved.z + collision.nozzle_clearance_mm`
+  → "nozzle would enter the printed part during PRESS/SHEAR: …" with the
+  numbers and the fix. `part_footprint` exported. Bounding-box footprint on
+  purpose (conservative); per-layer occupancy later.
+- `config.yaml` — new required `collision: {nozzle_clearance_mm: 1.0,
+  footprint_margin_mm: 2.0}` (`config.py` required + numeric).
+- `sequences/insert_magnet.py` — `toolpath=` keyword, passed to the guard.
+  `app.Controller._on_sentinel` passes its cached toolpath; `entry.run_headless`
+  parses one best-effort (headless is guarded too); `ui/plan_dialog.
+  envelope_report` and `viz/preview.PreviewWindow` pass theirs — dialog,
+  preview and run cannot disagree. Dialog status now reads "UNSAFE — cannot
+  save:" with one bullet per reason; Save stays disabled.
+- `app.Controller.emergency_stop()` — cancels the runner, injects `"abort"`
+  into a pending operator prompt (`_prompt_pending`), writes `M112` via
+  `send_line` with no idle guard / no lock / no `ok` wait, sets `estopped`,
+  emits an `error` with the recovery steps (power-cycle or `M999`, then
+  Connect). `refresh_state` is a no-op while `estopped` (no 2 s error spam
+  against a halted board); `connect()` clears the flag. Send failure →
+  `error` "use the printer's power switch", never raised out of the button.
+- `links/printer_sim.py` — models `M112` (heaters off, `halted`; every
+  later line raises `PrinterError` like a dead board) and `M999` (clears it).
+- `ui/panel.py` — red **EMERGENCY STOP** `tk.Button` top-right, always
+  enabled, no confirm.
+- `tests/data/sample.gcode` — the fixture *was* the collision case (its first
+  extrude started at the origin, footprint 0..80). First XY move is now a
+  travel and the part spans X 40..80, so the pocket at X60 puts the nozzle at
+  X30, legally outside; `test_workflow_sim` uses a −25 mm X offset for the
+  cura coupon (spans 0..50) for the same reason, plus a new collision-abort
+  workflow test.
+- Tests: `test_geometry` +9, `test_insert_magnet` +1, `test_printer_sim` +1,
+  `test_app` +6, `test_plan_dialog` +1, `test_config` +2, `test_workflow_sim`
+  +1 → **245 tests.** Manual: rendered our own window handles (PrintWindow) —
+  Plan dialog refuses a mid-part pocket with the full reason and Save
+  disabled; E-STOP mid-run stops the worker, logs the recovery message, and
+  the sim board refuses the sequence's error-handler `M104` exactly as a real
+  halted board would.
+
+**Not in C25 (still TODO):** safe-cancel routine; live view during the insert
+phase; window/performance consolidation; UX pass.
 
 ---
 

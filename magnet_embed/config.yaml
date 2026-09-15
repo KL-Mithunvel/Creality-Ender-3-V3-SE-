@@ -61,6 +61,14 @@ prime:
   mm: 2.0               # un-retract (+ a touch extra) on resume
   feed: 300
 
+# Damage guard for the magnet insert (Dev Rules 7 + 12) - one function
+# (`sequences.geometry.check_envelope`) used by the Plan dialog, the preview
+# and the run itself. The pole is offset from the nozzle, so seating the magnet
+# puts the NOZZLE somewhere else - possibly inside the printed part.
+collision:
+  nozzle_clearance_mm: 1.0   # nozzle tip must stay this far above the printed top while over the part
+  footprint_margin_mm: 2.0   # grow the part's XY footprint (toolpath bbox) by this much before testing
+
 sequence:
   max_retries: 3           # operator "retry" answers allowed before the insert aborts
 

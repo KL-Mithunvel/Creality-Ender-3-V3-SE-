@@ -14,18 +14,14 @@ criteria, risks). Architecture and rules: `.CLAUDE/CLAUDE.md`. Keep all three in
       value once and set `zcal.probe_z_offset` in `config.local.yaml` before the first run)
 - [ ] Patent: fill the `[INVENTORS TO COMPLETE]` sections of `docs/INVENTION_DISCLOSURE_DRAFT.md`,
       run a prior-art search with the K&K agent, confirm college IP policy
-- [ ] 🔴 **Collision check (Dev Rule 7/12):** extend `sequences/geometry.check_envelope` with a
-      toolpath-derived part footprint/height test so PRESS/SHEAR can never put the nozzle
-      inside the printed part (reproduced on `tests/data/sample.gcode` — planner says OK
-      for nozzle X30 Y60 Z1 inside the part). Decide deployable pole vs. pocket-near-edge.
-      See `.CLAUDE/CLAUDE.md` → Known Technical Debt, `project/PROJECT_PLAN.md` §6.
-- [ ] 🔴 **Damage-prevention errors in the magnet-insert planner and runtime (owner ask,
-      2026-09-16):** refuse, with a clear error in the Plan dialog *and* at run time, any
-      insert whose motion could damage the printer or part — nozzle below the build plate
-      (`press_z < 0` is already caught; make the message say "nozzle would hit the plate"),
-      nozzle or applicator body inside the printed part (the collision check above), pocket
-      XY outside the bed even when the nozzle target is inside, safe Z above `z_max`, and
-      non-numeric / impossible coordinates. Same function feeds dialog + run (Dev Rule 12).
+- [ ] Hardware decision (from the C25 guard): with a pole-above-nozzle offset the pocket
+      must sit within the X/Y offset of a part edge — decide deployable pole vs.
+      pocket-near-edge design (`project/PROJECT_PLAN.md` §6, disclosure Q11). Also measure
+      the applicator's lowest point vs. the nozzle tip and fold it into
+      `collision.nozzle_clearance_mm` if it hangs lower; bench-test EMERGENCY STOP with a
+      long move in flight (is `EMERGENCY_PARSER` on in the stock V3 SE firmware?)
+- [ ] Collision guard refinement: per-layer occupancy instead of the whole-part bounding
+      box (a concave part currently gets a conservative refusal)
 - [ ] 3D live view does not move during the magnet-insert phase (owner-observed): position
       is derived from G-code line progress, which freezes at the sentinel. Drive the 3D and
       2D markers from the planned insert waypoints (`plan_insert_moves`) while `_in_insert`,
@@ -37,9 +33,8 @@ criteria, risks). Architecture and rules: `.CLAUDE/CLAUDE.md`. Keep all three in
       `ttk.Notebook` in the main window (one figure per tab, created lazily, redraw only
       when visible), stop the Animate tick when not playing, and profile the 3D
       `draw_idle` — consider redrawing 3D at a slower rate than 2D or blitting
-- [ ] Safety: Emergency Stop (`M112`, bypasses the printer lock) + a configurable safe-cancel
-      routine (retract, lift, park, heaters off); run Home/Level Bed/Z Calibrate off the Tk
-      main thread so the panel stays clickable
+- [ ] Safety: a configurable safe-cancel routine (retract, lift, park, heaters off); run
+      Home/Level Bed/Z Calibrate off the Tk main thread so the panel stays clickable
 - [ ] Panel: Connect ↔ Disconnect toggle, guard double-connect; `on_phase` callback from
       `insert_magnet` → log + phase badge + planned-path overlay during an insert
 - [ ] Streaming reliability for long real prints: `N` line numbers + checksum + resend buffer;
@@ -53,6 +48,13 @@ criteria, risks). Architecture and rules: `.CLAUDE/CLAUDE.md`. Keep all three in
 
 ## Done
 
+- [x] **Phase 1.12 — C25** (`project/BUILD_PLAN.md`) — 🔴 damage guard: `geometry.check_envelope`
+      now refuses, with the reason, a pocket off the bed, a nozzle target out of range, a
+      press into the build plate, and — using the toolpath — a press/shear that would drive
+      the nozzle into the printed part; the Plan dialog, preview, headless run and GUI run
+      all use it (`config.collision.*`). Red **EMERGENCY STOP** button → `Controller.
+      emergency_stop` (`M112` immediately, no lock/guard; unblocks a pending prompt; sim
+      models the halt + `M999`). Fixture `sample.gcode` made collision-free. 245 tests.
 - [x] **Phase 1.11 — C24** (`project/BUILD_PLAN.md`) — two-column full-screen panel
       (jog/temperature/filament left, live view + send-G-code + log right, both
       stretching to fill a maximized window — `run_gui()` opens `zoomed` by default);

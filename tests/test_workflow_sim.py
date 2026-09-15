@@ -20,7 +20,9 @@ DATA = Path(__file__).parent / "data"
 
 
 def test_full_bring_your_own_gcode_workflow(config, tmp_path):
-    cfg = {**config, "magnet_tool_offset": {"x": 5.0, "y": 0.0, "z": 2.0}}
+    # pole 25 mm to the -X of the nozzle: the cura coupon spans X 0..50, so a
+    # pocket at X30 puts the nozzle at X55 - clear of the part (C25 guard)
+    cfg = {**config, "magnet_tool_offset": {"x": -25.0, "y": 0.0, "z": 2.0}}
 
     # 1. the operator brings a finished slice
     raw = tmp_path / "coupon.gcode"
@@ -30,10 +32,10 @@ def test_full_bring_your_own_gcode_workflow(config, tmp_path):
     tp = parse_toolpath(raw)
     assert tp.layer_count == 5
 
-    # 3. plan the insert; envelope must be clear
+    # 3. plan the insert; the damage guard must be clear
     mi = MagnetInsert(pocket_x=30.0, pocket_y=30.0, seat_z=6.0, shear_dir="+X")
     saved = tf.state_at_z(tp, mi.seat_z)
-    assert check_envelope(mi, cfg, saved) == []
+    assert check_envelope(mi, cfg, saved, tp) == []
     assert len(plan_insert_moves(mi, cfg, saved)) == 8
 
     # 4. save the annotated file
@@ -65,3 +67,21 @@ def test_workflow_aborts_cleanly_on_out_of_envelope(config, tmp_path):
     printer, dispenser = entry.build_links("sim", cfg, command_delay=0.0)
     assert entry.run_headless(printer, dispenser, cfg, out, confirm="success") == 1
     assert dispenser.count == 0                       # aborted before dispensing
+
+
+def test_workflow_aborts_on_nozzle_vs_part_collision(config, tmp_path):
+    """C25: a pocket in the middle of the part with a pole-above-nozzle offset
+    would drive the nozzle into the print - refused before any motion, headless
+    too (run_headless parses the toolpath for the guard itself)."""
+    cfg = {**config, "magnet_tool_offset": {"x": 5.0, "y": 0.0, "z": 2.0}}
+    raw = tmp_path / "coupon.gcode"
+    shutil.copy(DATA / "cura_sample.gcode", raw)
+    mi = MagnetInsert(pocket_x=30.0, pocket_y=30.0, seat_z=6.0, shear_dir="+X")
+    tp = parse_toolpath(raw)
+    bad = check_envelope(mi, cfg, tf.state_at_z(tp, mi.seat_z), tp)
+    assert any("printed part" in b for b in bad)
+    out = save_magnet_gcode(raw, mi, target_z=6.0)
+
+    printer, dispenser = entry.build_links("sim", cfg, command_delay=0.0)
+    assert entry.run_headless(printer, dispenser, cfg, out, confirm="success") == 1
+    assert dispenser.count == 0

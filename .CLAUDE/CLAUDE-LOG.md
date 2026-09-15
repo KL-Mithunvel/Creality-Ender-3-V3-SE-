@@ -855,6 +855,62 @@ smoke test.
   could damage the printer or part — nozzle into the build plate, nozzle or
   applicator into the printed part, pocket outside the bed, impossible
   coordinates — same check feeding the dialog and the run.
-- Not done (owner to choose next): the C25 fix chunk — collision/damage
-  checks in `geometry.check_envelope` + Emergency Stop first, then the
-  insert-phase live view, then the window/performance and UX pass.
+- Committed as `0de34e1` (docs only).
+
+## 2026-09-16 (cont.) — C25: nozzle-vs-part collision guard + Emergency Stop
+
+- Owner: "go, start C25 with the collision checks and e-stop".
+- `sequences/geometry.py` — `check_envelope(mi, config, saved, toolpath=None)`
+  is now the single damage guard (Dev Rules 7 + 12): pocket XY on the bed
+  (previously a pocket off the bed with a nozzle target on it passed); nozzle
+  approach/shear/safe-Z inside the machine limits; `press_z < 0` → "nozzle
+  would hit the build plate"; and, with the toolpath, `_part_collisions` —
+  the nozzle at PRESS or at 10 points along SHEAR inside the part's bounding
+  box (+ `collision.footprint_margin_mm`) while `press_z < saved.z +
+  collision.nozzle_clearance_mm` → "nozzle would enter the printed part during
+  …" with the numbers and the fix. Bounding-box footprint on purpose
+  (conservative; per-layer occupancy is a TODO). New required
+  `config.collision.*` keys.
+- Wired everywhere the file is known: `insert_magnet(..., toolpath=)`,
+  `Controller._on_sentinel` (cached toolpath), `entry.run_headless` (parses
+  one best-effort so headless is guarded too), `plan_dialog.envelope_report`,
+  `viz/preview.PreviewWindow`. Dialog status reads "UNSAFE — cannot save:"
+  with a bullet per reason; Save disabled.
+- **The test fixture was the collision case.** `tests/data/sample.gcode`'s
+  first extrude started at the origin (after `G28`), so its footprint was
+  0..80 and the pocket at X60 with the default +30 mm offset put the nozzle at
+  X30 *inside* the part — every Controller/entry test would have failed the
+  new guard, correctly. Fixed the fixture (first XY move is now a travel; part
+  spans X 40..80), and `test_workflow_sim` uses a −25 mm X offset for the cura
+  coupon (spans 0..50). Line count 26 → 29; no test depended on it.
+- `Controller.emergency_stop()` — cancels the runner, puts `"abort"` on the
+  answers queue if the worker is blocked in `_prompt` (new `_prompt_pending`
+  flag), writes `M112` with `send_line` (no idle guard, no `_printer_lock`,
+  no `wait_ok` — the worker may hold the lock in `wait_ok` for 30 s), sets
+  `estopped`, emits an `error` with the recovery steps. `refresh_state` is a
+  no-op while `estopped` (caught during the GUI check: the 2 s idle poll would
+  otherwise log a `PrinterError` against the halted board every tick);
+  `connect()` clears it. `SimPrinter` models `M112` (heaters 0, `halted`,
+  later lines raise `PrinterError`) and `M999`. Red **EMERGENCY STOP**
+  `tk.Button` top-right of the panel (ttk ignores `bg` on Windows), always
+  enabled, no confirm.
+- Tests 225 → 245 (`test_geometry` +9, `test_app` +6, `test_config` +2,
+  `test_insert_magnet` +1, `test_printer_sim` +1, `test_plan_dialog` +1,
+  `test_workflow_sim` +1). `py_compile` clean; `python main.py --sim --no-gui
+  tests\data\sample.gcode --confirm success` exits 0.
+- Verified in the real panel via the PrintWindow render of our own windows:
+  Plan dialog with pocket X75 Y50 on the sample → red "UNSAFE" with the full
+  reason, Save disabled, the X–Z preview showing the press line through the
+  silhouette; EMERGENCY STOP pressed mid-run → run stopped, `estopped` True,
+  recovery message in the log, and the sequence's error-handler `M104` refused
+  by the halted sim exactly as a real board would (logged, not raised).
+- Docs synced: `.CLAUDE/CLAUDE.md` (status, module rows, Key Modules for
+  geometry/insert_magnet/app/panel, Key Conventions, Dev Rule 12, Known
+  Technical Debt — collision + e-stop struck through with the remaining
+  limits listed), `project/BUILD_PLAN.md` (Phase 1.12 / C25), `README.md`,
+  `TODO.md`, `project/PROJECT_PLAN.md` (§6, risks, status),
+  `project/HOW_IT_WORKS.md` (§5), `docs/INVENTION_DISCLOSURE_DRAFT.md`
+  (Q8/Q14/Q27: check now implemented).
+- Still open from the review: safe-cancel routine, insert-phase live view,
+  window/performance consolidation, UX pass, hardware bench-test of `M112`
+  (`EMERGENCY_PARSER` on the stock board unverified).

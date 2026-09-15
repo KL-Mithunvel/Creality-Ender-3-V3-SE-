@@ -515,6 +515,75 @@ def test_progress_zero_then_advances_then_final(config):
     assert total > 0 and done == total
 
 
+# --- C25: emergency stop ----------------------------------------------
+
+def test_emergency_stop_while_streaming_sends_m112_and_stops_the_run(config):
+    ctl = _ctl(config, delay=0.03)
+    ctl.load_gcode(SAMPLE)
+    ctl.start_run()
+    assert _wait(lambda: ctl.running)
+    ctl.emergency_stop()
+    assert "M112" in ctl.printer.sent            # went out immediately, no idle guard
+    assert ctl.estopped
+    assert _wait(lambda: not ctl.running)        # run cancelled
+    assert not ctl.runner.finished
+    seen = ctl.poll_events()
+    assert any(k == "error" and "EMERGENCY STOP" in str(p) for k, p in seen)
+
+
+def test_emergency_stop_unblocks_a_pending_operator_prompt(config):
+    ctl = _ctl(config, delay=0.03)
+    ctl.load_gcode(SAMPLE)
+    ctl.start_run()
+    _pump_until(ctl, "prompt")                   # worker now blocked on the operator
+    ctl.emergency_stop()
+    assert _wait(lambda: not ctl.running)        # "abort" injected, worker exited
+    assert "M112" in ctl.printer.sent
+
+
+def test_emergency_stop_when_idle_still_sends_m112(config):
+    ctl = _ctl(config)
+    ctl.poll_events()
+    ctl.emergency_stop()
+    assert ctl.printer.sent[-1] == "M112"
+    assert ctl.printer.query_state().nozzle_target == 0
+    assert any(k == "error" and "M112" in str(p) for k, p in ctl.poll_events())
+
+
+def test_emergency_stop_surfaces_a_send_failure(config):
+    ctl = _ctl(config)
+    ctl.poll_events()
+
+    def dead(_line):
+        from magnet_embed.exceptions import PrinterConnectionError
+
+        raise PrinterConnectionError("port gone")
+
+    ctl.printer.send_line = dead
+    ctl.emergency_stop()                          # must not raise
+    assert not ctl.estopped
+    assert any(k == "error" and "power switch" in str(p) for k, p in ctl.poll_events())
+
+
+def test_refresh_state_is_silent_after_an_estop(config):
+    ctl = _ctl(config)
+    ctl.emergency_stop()
+    ctl.poll_events()
+    before = list(ctl.printer.sent)
+    ctl.refresh_state()                          # the panel polls this every 2 s
+    assert ctl.printer.sent == before            # nothing sent to a halted board
+    assert ctl.poll_events() == []               # and no error spam
+
+
+def test_reconnect_clears_estopped(config):
+    ctl = _ctl(config)
+    ctl.emergency_stop()
+    assert ctl.estopped
+    ctl.printer.command("M999")
+    ctl.connect()
+    assert not ctl.estopped
+
+
 # --- C22: link_summary (GUI mode/port label) --------------------------
 
 def test_link_summary_simulator(config):

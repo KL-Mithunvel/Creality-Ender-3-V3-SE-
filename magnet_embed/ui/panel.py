@@ -114,6 +114,17 @@ class ControlPanel(ttk.Frame):
         self.target_lbl = ttk.Label(top, text=f"({self.c.link_summary})", foreground="gray")
         self.target_lbl.pack(side="left")
         ttk.Button(top, text="Settings…", command=self._open_settings).pack(side="left", padx=(12, 0))
+        # Emergency stop: always enabled, never confirmed, bypasses the idle
+        # guard and the printer lock (`Controller.emergency_stop`). A plain
+        # tk.Button, not ttk - the Windows ttk theme ignores background colours
+        # and this one has to be unmistakably red.
+        self.btn_estop = tk.Button(
+            top, text="EMERGENCY STOP", command=self.c.emergency_stop,
+            bg="#c62828", fg="white", activebackground="#8e0000", activeforeground="white",
+            font=("TkDefaultFont", 10, "bold"), relief="raised", bd=2, padx=12, pady=2,
+            cursor="hand2",
+        )
+        self.btn_estop.pack(side="right")
         row += 1
 
         files = ttk.Frame(b)

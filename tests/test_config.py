@@ -34,6 +34,7 @@ def test_local_override_is_merged(tmp_path):
         "prime: {mm: 2, feed: 300}\n"
         "press: {feed: 60, dwell_ms: 500}\n"
         "shear: {distance: 5, feed: 1200}\n"
+        "collision: {nozzle_clearance_mm: 1.0, footprint_margin_mm: 2.0}\n"
         "gcode: {sentinel_token: ';MAGNET_INSERT'}\n"
         "zcal: {x: 110, y: 110, start_z: 5, step_mm: 0.05, feed: 100, probe_z_offset: 0}\n",
         encoding="utf-8",
@@ -106,6 +107,23 @@ def test_validate_rejects_non_numeric_zcal_field():
 
     cfg = load_config()
     cfg["zcal"]["feed"] = "fast"
+    with pytest.raises(ValueError):
+        _validate(cfg)
+
+
+def test_collision_defaults_present():
+    cfg = load_config()
+    assert cfg["collision"]["nozzle_clearance_mm"] > 0
+    assert cfg["collision"]["footprint_margin_mm"] >= 0
+
+
+def test_validate_rejects_non_numeric_collision_field():
+    import pytest
+
+    from magnet_embed.config import _validate
+
+    cfg = load_config()
+    cfg["collision"]["nozzle_clearance_mm"] = "some"
     with pytest.raises(ValueError):
         _validate(cfg)
 

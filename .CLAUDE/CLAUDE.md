@@ -60,7 +60,8 @@ involvement is acceptable at this stage.
 ## Running the System
 
 > Build status: **C1–C8 + Phase 1.6 (C13–C19) + Phase 1.7 (C20) + Phase 1.8
-> (C21) + Phase 1.9 (C22) + Phase 1.10 (C23) + Phase 1.11 (C24) done, plus
+> (C21) + Phase 1.9 (C22) + Phase 1.10 (C23) + Phase 1.11 (C24) + Phase 1.12
+> (C25: nozzle-vs-part collision guard + Emergency Stop — 245 tests) done, plus
 > mid-print temp control, a Level Bed button, a run-report summary in the
 > log, in-panel config editing, an embedded live-print view showing 2D and
 > equal-scale bed-aware 3D side by side with a Global-bed/Local-part crop
@@ -127,7 +128,7 @@ back-compat wrappers that call `entry` with a fixed mode.
 
 | Path | Role |
 |------|------|
-| `magnet_embed/config.yaml` | All ports, baud, park/safe-Z, temps (incl. `nozzle_min_c`/`nozzle_max_c`/`bed_min_c`/`bed_max_c` guard rails for `set_temp`), the magnet-tool XYZ offset, press/shear distances + feeds, sentinel token, `zcal.*` (Z-offset calibration point/step/feed and the trusted `probe_z_offset`). Nothing hardware-specific is hardcoded elsewhere. |
+| `magnet_embed/config.yaml` | All ports, baud, park/safe-Z, temps (incl. `nozzle_min_c`/`nozzle_max_c`/`bed_min_c`/`bed_max_c` guard rails for `set_temp`), the magnet-tool XYZ offset, press/shear distances + feeds, `collision.*` (`nozzle_clearance_mm` the nozzle must keep above the printed top while over the part, `footprint_margin_mm` grown around the part's bbox — the C25 damage guard), sentinel token, `zcal.*` (Z-offset calibration point/step/feed and the trusted `probe_z_offset`). Nothing hardware-specific is hardcoded elsewhere. |
 | `main.py` (repo root) | **The** entry point. `--sim` (default) / `--printer` / `--hardware`; `--ping`, `--no-gui` (headless + `--confirm`), `--no-dispenser`, `--config`. All it does is parse args and call `magnet_embed.entry`. |
 | `magnet_embed/entry.py` | Shared wiring: `build_links(mode, config)` → `(printer, dispenser)`; `ping()`; `run_headless()`; `launch_panel()`. One place that constructs links and runs the smoke test. |
 | `magnet_embed/main.py` / `main_printer.py` / `main_sim.py` | Back-compat `python -m …` wrappers — each parses its small CLI and calls `entry` with a fixed mode (`hardware` / `printer` / `sim`). The Uno stays optional in `hardware` mode: a dispenser that fails to connect degrades to printer-only for the session. |
@@ -144,8 +145,8 @@ back-compat wrappers that call `entry` with a fixed mode.
 | `magnet_embed/gcode/toolpath.py` | `parse_toolpath(path) -> Toolpath` — a slice as ordered `Segment`s (travel vs extrude, each carrying a 1-based `line_no`), a layer→Z table (slicer markers, else Z-derived), bounding box, distances, rough time. `progress_position(current_line)` / `progress_layer(current_line)` bisect the parsed path to the nozzle position/layer implied by how far `GcodeRunner` has streamed — no extra printer traffic. Feeds the visualisation, the plan dialog, and the panel's live-print view. |
 | `magnet_embed/viz/toolpath_fig.py` | Pure preview helpers (`nozzle_waypoints`, `pole_waypoints`, `sample_polyline`, `state_at_z`, `progressive_path_3d`) + matplotlib `draw_*` functions (layer X–Y, side X–Z, 3D path, phase-coloured insert overlay, `draw_live_layer`/`update_live_marker` for the panel's 2D live view + `draw_live_3d(..., show_bed=)`/`update_live_3d` for the 3D one — `show_bed=True` spans the real bed with the plate outline, `show_bed=False` crops tight to the part; both use explicit `set_xlim`/`set_ylim`/`set_zlim` + `set_box_aspect` for equal-scale axes with no autoscale-margin surprises, plus a path that grows as the nozzle passes through it). No GUI backend. |
 | `magnet_embed/viz/preview.py` | `PreviewWindow` (Tk `Toplevel`, matplotlib `FigureCanvasTkAgg`) — layer slider, play/scrub the nozzle + pole tip along `plan_insert_moves`, envelope violations flagged, "Open 3D view". `python main.py --preview FILE`. |
-| `magnet_embed/sequences/geometry.py` | `compute_targets` / `plan_insert_moves` / `check_envelope` / `pole_point` — the one place the insert-motion targets are computed. `insert_magnet` executes them; the preview + plan dialog draw and envelope-check the same numbers. |
-| `magnet_embed/sequences/insert_magnet.py` | The `SAVE → PARK → DISPENSE → APPROACH → PRESS → SHEAR → LIFT → ASK → RESUME` state machine. Targets come from `geometry.compute_targets`. |
+| `magnet_embed/sequences/geometry.py` | `compute_targets` / `plan_insert_moves` / `check_envelope(mi, config, saved, toolpath=None)` / `part_footprint` / `pole_point` — the one place the insert-motion targets are computed **and the one damage guard** (C25): pocket on the bed, nozzle targets inside the machine limits, no press into the build plate, and — with the toolpath — no press/shear that puts the nozzle inside the printed part. `insert_magnet` executes the targets; the preview + plan dialog draw and check the same numbers. |
+| `magnet_embed/sequences/insert_magnet.py` | The `SAVE → PARK → DISPENSE → APPROACH → PRESS → SHEAR → LIFT → ASK → RESUME` state machine. Targets come from `geometry.compute_targets`; `toolpath=` (keyword) enables the collision guard — every caller that has the file passes it. |
 | `magnet_embed/app.py` | `Controller` — headless UI↔worker mediator (threads, queues, prompt blocking); optional `log_dir` writes a per-run transcript. `load_gcode()` caches a parsed `toolpath` + raw `gcode_lines` (best-effort — a parse failure logs and leaves them empty rather than blocking the load); `progress_point`/`current_line_text` derive the live nozzle position + current G-code line from them. `start_z_calibration()`/`nudge_z()`/`save_z_offset()` drive the Z Calibrate dialog (idle-only). `link_summary` → `"simulator"` / `"printer COM3"` / `"... + dispenser COM4"`, from whether the link objects have a `.port` (real) or not (sim). |
 | `magnet_embed/runlog.py` | `RunLog` — one `logs/<ts>-<name>.log` per streamed job, a timestamped line per event, plus a human-readable `=== SUMMARY ===` block appended on `close()` (duration, lines sent/total, sentinels seen, any errors, final position + temps). `summary_text` is also echoed to the panel log right after a run finishes. |
 | `magnet_embed/ui/panel.py` | Tkinter panel — thin view over `Controller`; a two-column layout (jog/temperature/filament left, live view + send-G-code + log right, right column stretches to fill the window) wrapped in a scrollable canvas as a fallback so nothing clips on a screen too small even maximized; `run_gui()` opens maximized by default; shows a mode/port label (`Controller.link_summary`) next to the connection status; jog/home/Level-Bed/Z-Calibrate + raw G-code entry idle-only, "Plan magnet insert…", "Settings…", and "Z Calibrate…" dialogs, modal Success/Retry/Abort prompt, live log, an embedded live-print view showing the current layer (2D) and an isometric 3D view **side by side** with a "Global bed" / "Local part" crop toggle + nozzle marker + current-step G-code text. |
@@ -296,19 +297,38 @@ hardware attached.
 ### `sequences/geometry.py`
 - `compute_targets(mi, config, saved) -> Targets` (`approach_xy`, `press_z`,
   `shear_xy`, `safe_z`), `plan_insert_moves(mi, config, saved) -> list[InsertMove]`
-  (nozzle-tip waypoints, phase-tagged), `check_envelope(mi, config, saved) -> list[str]`,
+  (nozzle-tip waypoints, phase-tagged), `check_envelope(mi, config, saved,
+  toolpath=None) -> list[str]`, `part_footprint(toolpath, margin_mm)`,
   `pole_point(nozzle, config) -> Point`.
 - Pure. `insert_magnet` builds its targets here; the C16 preview and C17 dialog draw
   and envelope-check the *same* function output — the preview cannot drift from the run.
+- **`check_envelope` is the damage guard (C25, Dev Rules 7 + 12).** One
+  plain-language reason per problem, empty means OK. In order: (1) the pocket
+  itself is on the bed (a pocket off the bed with a nozzle target on it was
+  previously accepted); (2) approach/shear XY and safe Z inside `machine.*`;
+  (3) `press_z < 0` → "nozzle would hit the build plate"; (4) with a
+  `toolpath`, `_part_collisions`: the part is printed up to `saved.z` when the
+  sentinel fires, so if `press_z < saved.z + collision.nozzle_clearance_mm`
+  and the nozzle XY at PRESS or at any of 10 sampled points along SHEAR lies
+  inside `part_footprint` (toolpath bbox grown by
+  `collision.footprint_margin_mm`) → "nozzle would enter the printed part
+  during PRESS/SHEAR …" with the numbers and the fix (pocket within the offset
+  of a part edge, or change the offset). The footprint is the bounding box —
+  deliberately conservative; per-layer occupancy is a later refinement.
+  Without a toolpath only (1)–(3) run. The pole tip touching the pocket is the
+  intended contact and is never flagged.
 
 ### `sequences/insert_magnet.py`
 - `insert_magnet(printer: PrinterLink, dispenser: DispenserLink | None, mi: MagnetInsert,
-  config: dict, prompt: Callable[[str], str]) -> None`
+  config: dict, prompt: Callable[[str], str], *, toolpath: Toolpath | None = None) -> None`
   — `mi` carries the parsed sentinel fields; `prompt("dispense")` returns
   `"ready" | "abort"` (only used when `dispenser` is `None`), `prompt("confirm")`
-  returns `"success" | "retry" | "abort"`.
-- Targets from `geometry.compute_targets`; envelope from `geometry.check_envelope`
-  (raises `OutOfEnvelopeError` if non-empty). Runs the state machine in
+  returns `"success" | "retry" | "abort"`; `toolpath` is the parsed file being
+  printed (`Controller` passes its cached one, `entry.run_headless` parses it
+  best-effort) and enables the nozzle-vs-part collision guard.
+- Targets from `geometry.compute_targets`; damage guard from
+  `geometry.check_envelope(..., toolpath)` (raises `OutOfEnvelopeError` if
+  non-empty — before any line is sent). Runs the state machine in
   Architecture → Insert sequence; every phase gated with `M400`.
 - Raises `OutOfEnvelopeError` (before any move), `SequenceAborted`, or the dispenser's error.
 - **No `G28` anywhere** — every move is commanded and tracked (Development Rule 11).
@@ -332,7 +352,21 @@ hardware attached.
   dialog's magnet offset) — all no-ops while a run is active, and all now
   surface a `PrinterError`/`AckTimeout`/`ResendRequested` as an `error` event
   instead of raising — plus `start_run`, `pause`, `resume`, `cancel`,
-  `answer_prompt`. `level_bed` blocks the caller for the whole probe (can be a
+  `answer_prompt`, and **`emergency_stop()`** (C25): allowed at *any* time —
+  cancels the runner, injects an `"abort"` answer if the worker is blocked on
+  an operator prompt (`_prompt_pending`), then writes `M112` straight to the
+  link with `send_line` — **no idle guard, no `_printer_lock`, no `wait_ok`**
+  (the worker may hold the lock inside `wait_ok` for up to `ack_timeout_s`;
+  an e-stop cannot wait for that; any `ok` the board returns for `M112` may
+  be eaten by the worker's in-flight `wait_ok`, harmless since the run is
+  being cancelled). Sets `estopped` (property) and emits an `error` telling
+  the operator to power-cycle / `M999` and Connect again; `connect()` clears
+  it; `refresh_state` is a no-op while `estopped` so the 2 s idle poll doesn't
+  spam errors against a halted board. A failure to send is reported as an
+  `error` ("use the printer's power switch"), never raised out of a button.
+  Marlin honours `M112` ahead of the queue only with `EMERGENCY_PARSER`
+  compiled in — unverified on the stock V3 SE firmware; without it the stop
+  still executes as the next queued command. `level_bed` blocks the caller for the whole probe (can be a
   couple of minutes) — same accepted trade-off as `home`, just longer;
   `wait_ok` already tolerates it via Marlin's `busy:` keepalive
   (`DEFAULT_KEEPALIVE_INTERVAL 2` in the stock firmware, well under
@@ -356,6 +390,9 @@ hardware attached.
 
 ### `ui/panel.py` — `ControlPanel` + `run_gui(controller)`
 - Thin Tkinter view over a `Controller`. Connect, load G-code, run/pause/resume/cancel,
+  a red **EMERGENCY STOP** button at the top right (`self.btn_estop`, a plain
+  `tk.Button` because the Windows ttk theme ignores background colours;
+  always enabled, no confirm dialog, calls `Controller.emergency_stop`),
   a run-progress bar, jog (0.1/1/10 mm) + home + "Level Bed…" + "Z Calibrate…"
   (confirm dialogs first — both move the toolhead) + raw G-code entry +
   extrude/retract **idle only**, "Plan magnet insert…", read-only log, live
@@ -460,6 +497,13 @@ hardware attached.
   at `seat_z`). The offset shrinks the reachable area and can make a low pocket
   unreachable (`seat_z − offset.z < 0`) — the host checks every target in-envelope and
   **aborts the sequence with the print still paused** if not.
+- **Pole above the nozzle means the nozzle goes below the seat.** With
+  `offset.z > 0` the nozzle presses to `seat_z − offset.z`, *below* the printed
+  top, `offset.xy` away from the pocket — so the pocket must sit within the
+  X/Y offset of a part edge or the nozzle lands inside the part. The C25 guard
+  (`geometry.check_envelope` with the toolpath) refuses that case in the Plan
+  dialog, the preview and the run alike; `config.collision.*` sets the
+  clearance and footprint margin.
 - **Z-probe offset is trusted from config, not read back from the printer.**
   `config.zcal.probe_z_offset` — same pattern as `magnet_tool_offset`: measure
   the real value once (send a bare `M851` from a terminal), put it in
@@ -601,23 +645,26 @@ parks, magnet dispensed, controlled press + lateral shear run, print resumes and
   first magnet-flow bench session may surface firmware-serial quirks (the
   Ender-3 V3 SE has known OctoPrint friction) and mechanism issues. Treat it as
   debugging, not production.
-- **🔴 Nozzle-vs-part collision is not checked (Dev Rule 7/12 gap, found
-  2026-09-16).** `sequences/geometry.check_envelope` only tests bed limits.
-  With `magnet_tool_offset.z > 0` (pole above nozzle, the default) PRESS drives
-  the *nozzle* to `seat_z − offset.z`, below the seat, at `offset.xy` from the
-  pocket — inside the printed part unless the pocket is within the offset of a
-  part edge. Reproduced on `tests/data/sample.gcode`: the planner says OK for
-  nozzle X30 Y60 Z1 inside an 80 × 80 mm part printed to Z 6. The Plan dialog's
-  side view draws the collision but the status text still reads OK. Fix planned:
-  toolpath-derived footprint/height check in `check_envelope` (so the dialog,
-  preview and run all inherit it) plus a design decision on a deployable pole
-  vs. a pocket-near-edge constraint (`project/PROJECT_PLAN.md` §6, disclosure
-  draft Q9/Q11). Until fixed, **plan pockets so the nozzle lands outside the
-  part footprint** and check the X–Z preview by eye.
-- **No emergency stop, no safe cancel.** `Controller.cancel` only stops
-  streaming — heaters stay on, the head stays put, and there is no `M112`
-  button. Planned: an Emergency Stop that bypasses the printer lock, and a
-  configurable cancel routine (retract, lift, park, heaters off).
+- ~~Nozzle-vs-part collision is not checked~~ — **fixed in C25**
+  (`geometry.check_envelope(..., toolpath)`, see Key Modules). Remaining
+  limits of the guard: the part footprint is the toolpath **bounding box**
+  (an L-shaped part is treated as its enclosing rectangle — conservative, may
+  refuse a legal pocket in a concave part); the **applicator body** itself is
+  not modelled (only the nozzle tip is tested — measure the add-on's lowest
+  point vs. the nozzle and, if it hangs lower, fold that into
+  `collision.nozzle_clearance_mm`); `saved.z` is taken as the printed top
+  (true at a layer start, which is where the sentinel sits). With a
+  pole-above-nozzle offset the guard will, correctly, refuse any pocket more
+  than `|offset.x|`/`|offset.y|` from a part edge — the deployable-pole /
+  pocket-near-edge design decision is still open (`project/PROJECT_PLAN.md`
+  §6).
+- ~~No emergency stop~~ — **fixed in C25** (`Controller.emergency_stop`, red
+  panel button). Still open: **no safe cancel** — `Controller.cancel` only
+  stops streaming (heaters stay on, head stays put); a configurable cancel
+  routine (retract, lift, park, heaters off) is still planned. Also unverified
+  on hardware: whether the stock V3 SE firmware has `EMERGENCY_PARSER`
+  (`M112` honoured mid-command) — bench-test the button with a long move in
+  flight before relying on it.
 - **Home / Level Bed / Z Calibrate block the Tk main thread** for their whole
   duration, so nothing in the panel (including a future stop button) is
   clickable during a two-minute probe. Planned: run one-off commands on a short
@@ -721,9 +768,11 @@ Referenced by number in TODO items and commit messages.
 11. **No `G28` / homing during a print.** After `SAVE`, every move is commanded and
     tracked; return to the saved coordinates. Homing mid-print risks driving the nozzle
     through the part. (project — collision risk)
-12. **The insert target must be in-envelope after the tool offset is applied** — the
-    sequence checks and aborts (print stays paused) rather than commanding an
-    out-of-range move. (project)
+12. **The insert must pass the damage guard after the tool offset is applied** —
+    `geometry.check_envelope`: pocket on the bed, nozzle targets in range, no
+    press into the plate, no press/shear into the printed part. The sequence
+    checks and aborts (print stays paused) rather than commanding the move;
+    the Plan dialog and preview run the same check. (project)
 13. **Press + shear logic lives on the host, not the Uno.** The Arduino sketch only
     dispenses; keep it dumb. (project)
 

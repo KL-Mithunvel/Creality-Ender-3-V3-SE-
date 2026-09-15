@@ -33,6 +33,22 @@ def test_relative_move(printer):
     assert (st.x, st.y, st.z) == (15.0, 7.0, 1.0)
 
 
+def test_m112_halts_until_m999(printer):
+    from magnet_embed.exceptions import PrinterError
+
+    printer.command("M104 S200")
+    printer.command("M140 S60")
+    printer.command("M112")
+    st = printer.query_state()
+    assert printer.halted
+    assert st.nozzle_target == 0 and st.bed_target == 0     # heaters killed
+    with pytest.raises(PrinterError):
+        printer.command("G1 X10")                           # dead until reset
+    printer.command("M999")
+    assert not printer.halted
+    printer.command("G1 X10")                               # alive again
+
+
 def test_relative_extrusion(printer):
     printer.command("M83")
     printer.command("G1 E1")

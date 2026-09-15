@@ -228,10 +228,13 @@ transform with an envelope guard, since the firmware is untouched.
    and temperature) and calls **B5** with the parsed values from **B3**.
 5. **B4** computes the carriage target = pocket − offset and the press depth =
    seat_z − offset_z, and checks all targets are reachable; if not, it aborts with
-   the print still paused. *(Planned extension, see Q9 item 7: the same check
-   also tests the nozzle position during PRESS/SHEAR against the printed part's
-   own footprint, derived from the sliced toolpath, so the nozzle can never be
-   driven into the partly-printed part while the pole seats the magnet.)*
+   the print still paused. The same check (implemented 2026-09-16, see Q9
+   item 7) also tests the nozzle position during PRESS and along SHEAR against
+   the printed part's own footprint, derived from the sliced toolpath, and
+   refuses a press into the build plate — so the nozzle can never be driven
+   into the plate or the partly-printed part while the pole seats the magnet.
+   The operator-facing planner (**B10**) runs the identical function and
+   reports each reason in plain language.
 6. **B5** runs:
    - **SAVE** the current position, filament counter, coordinate/extruder modes,
      feedrate, temperatures.
@@ -411,10 +414,12 @@ See Q7 (components) + Q8 (operation). Worked example (simulation, current build)
   V3 SE over USB, 2026-09-09) and a real sliced part was streamed through the
   host on 2026-09-15 — no magnet insert on hardware yet.
 - Note on this worked example: with the baseline offset the nozzle presses at
-  X30 Y60 Z1, which lies *inside* an 80 × 80 mm test coupon. The bed-limit check
-  passes, but the toolpath collision check (Q9 item 7) would reject it — the
-  pocket must sit within 30 mm of the part's −X edge for a pole-above-nozzle
-  applicator, or a deployable pole is needed (Q11).
+  X30 Y60 Z1. For a coupon whose footprint spans X 40..80 that point is clear
+  of the part and the plan is accepted; for a coupon spanning X 0..80 it lies
+  *inside* the part and the toolpath collision check (Q9 item 7, implemented)
+  refuses the plan with the reason — the pocket must sit within 30 mm of the
+  part's −X edge for a pole-above-nozzle applicator, or a deployable pole is
+  needed (Q11).
 
 Broad workable parameter ranges: see Q21.
 
@@ -624,12 +629,14 @@ Not yet TRL 4 (lab validation of the whole system).
   2026-09-15). The physical mechanism (magazine / escapement / holding pole /
   mount) and the Arduino sketch are **not yet built**; no magnet insert has
   been performed on hardware.
-- Known design issue recorded 2026-09-16 and reflected in Q9/Q11/Q18/Q21: with
-  the pole tip above the nozzle, the nozzle can be driven into the printed part
-  during PRESS unless the pocket is near a part edge. The planned fix is a
-  toolpath-derived collision check plus the deployable-pole embodiment; both
-  are disclosed here so they are covered regardless of which the prototype
-  adopts.
+- Known design issue recorded 2026-09-16 and reflected in Q8/Q9/Q11/Q18/Q21:
+  with the pole tip above the nozzle, the nozzle can be driven into the printed
+  part during PRESS unless the pocket is near a part edge. The toolpath-derived
+  collision check is now implemented in the host (planner, preview and run
+  share it; 245 automated tests); the deployable-pole embodiment remains a
+  design option. Both are disclosed so they are covered regardless of which
+  the prototype adopts. An emergency-stop control (`M112`) was added to the
+  operator interface at the same time.
 - Reference material and prior-art notes: **`project/RESEARCH.md`** (comprehensive)
   and `project/BUILD_PLAN.md` → References (protocol-focused).
 - **Before any public disclosure or repo publication, consult the K&K agent** (see

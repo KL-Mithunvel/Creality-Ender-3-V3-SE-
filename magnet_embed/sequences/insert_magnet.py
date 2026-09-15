@@ -28,6 +28,7 @@ import logging
 from collections.abc import Callable
 
 from ..exceptions import OutOfEnvelopeError, SequenceAborted
+from ..gcode.toolpath import Toolpath
 from ..gcode.util import fmt_number as _fmt
 from ..links.base import DispenserLink, PrinterLink
 from ..state import MagnetInsert, PrinterState
@@ -51,8 +52,15 @@ def insert_magnet(
     mi: MagnetInsert,
     config: dict,
     prompt: Prompt,
+    *,
+    toolpath: Toolpath | None = None,
 ) -> None:
     """Park, embed one magnet, and leave the printer ready to resume printing.
+
+    `toolpath` is the parsed file being printed; when given, the damage guard
+    also refuses a press/shear that would drive the nozzle into the printed
+    part (`geometry.check_envelope`). Without it only the bed/plate limits are
+    checked - callers that have the file should always pass it.
 
     Raises `OutOfEnvelopeError` (before any move), `SequenceAborted`, or whatever
     the dispenser raises. On any failure the nozzle target is restored so the
@@ -75,8 +83,8 @@ def insert_magnet(
     shear_x, shear_y = targets.shear_xy
     safe_z = targets.safe_z
 
-    # --- envelope check: before ANY motion (Development Rule 12) ---------
-    bad = check_envelope(mi, config, saved)
+    # --- damage guard: before ANY motion (Development Rules 7 + 12) -------
+    bad = check_envelope(mi, config, saved, toolpath)
     if bad:
         raise OutOfEnvelopeError(
             "insert aborted, print left paused — " + "; ".join(bad)

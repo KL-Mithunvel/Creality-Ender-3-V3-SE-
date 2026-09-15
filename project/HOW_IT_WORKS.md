@@ -138,7 +138,26 @@ Two consequences the software checks for:
    past its limit. The software computes every target and **refuses (leaves the
    print paused)** if anything is out of range.
 2. **Minimum depth.** If the pole sits 5 mm above the nozzle, you physically can't
-   push a magnet to a height below 5 mm. Same check catches it.
+   push a magnet to a height below 5 mm — the nozzle would hit the build plate.
+   Same check catches it.
+3. **The nozzle must not land inside the part.** This one is easy to miss: if
+   the pole is 5 mm *above* the nozzle, then while the pole presses the magnet
+   to its seat the nozzle is 5 mm *lower* — below the top of the part — and
+   30 mm to the side. If that spot is over the part, the nozzle ploughs into
+   it. The software knows the part's outline from the G-code it is streaming,
+   so it refuses any plan where the nozzle would be over the part while below
+   its top (plus a small clearance). The practical rule: with a pole above the
+   nozzle, the pocket has to be within the offset distance of the part's edge.
+
+All three checks run in the "Plan magnet insert" dialog (which shows the
+reason in red and won't let you save), in the preview, and again in the real
+run before anything moves — it's one function, so they can't disagree.
+
+There is also a red **EMERGENCY STOP** button at the top right of the panel. It
+sends `M112` to the printer immediately — even mid-move, even while the insert
+is waiting for you — which turns the heaters and motors off and halts the
+firmware. After using it, power-cycle the printer (or send `M999`) and click
+Connect again.
 
 ---
 
@@ -235,7 +254,7 @@ streaming tests/data/sample.gcode through SimPrinter
 SENTINEL  X60.000 Y60.000 Z6.000 S+X  -> running insert sequence
 magnet insert complete; printer restored to X60.00 Y60.00 Z6.00
 insert sequence done -> resuming stream
-done: 19/26 lines sent, 1 sentinel(s), 1 magnet(s) dispensed;
+done: 19/29 lines sent, 1 sentinel(s), 1 magnet(s) dispensed;
       final pos X80.00 Y80.00 Z8.00, nozzle 0/0
 ```
 
