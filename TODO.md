@@ -67,7 +67,8 @@ Chunked in `project/BUILD_PLAN.md` — one commit per chunk.
 - [x] C5 `_marlin_rx` + `printer_serial` + `dispenser_serial` + `main.py` + `--ping` CLIs (91 pass)
 - [x] C6 `runlog.py` + integration sim test + config type-checks + full sanity pass (94 pass)
 - [x] C7 `main_printer.py` printer-only entry point (real printer, `dispenser=None`) + `--ping` (98 pass)
-- [ ] C8–C12 `main` without the Uno + Pronterface-grade panel — see "In Progress" above
+- [x] C8 `main.py --no-dispenser` / graceful dispenser-optional degrade (105 pass)
+- [x] C9–C12 folded into Phase 1.6 — raw G-code entry (C13), idle poll + extrude/retract + progress bar (C18)
 - [~] Hardware smoke test on the real printer + Uno (manual; needs the applicator)
       - [x] Printer link: `printer_serial --ping` on COM3 — M115/M400/M114 OK (2026-09-09)
       - [ ] Uno link (`dispenser_serial --ping`) — Uno not connected yet
