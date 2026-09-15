@@ -59,14 +59,17 @@ involvement is acceptable at this stage.
 
 ## Running the System
 
-> Build status: **C1–C8 + Phase 1.6 (C13–C19) done, plus mid-print temp control,
-> a Level Bed button, a run-report summary in the log, and in-panel config
-> editing — 198 tests** (`project/BUILD_PLAN.md`).
+> Build status: **C1–C8 + Phase 1.6 (C13–C19) + Phase 1.7 (C20) done, plus
+> mid-print temp control, a Level Bed button, a run-report summary in the log,
+> in-panel config editing, and an embedded live-print view — 209 tests**
+> (`project/BUILD_PLAN.md`).
 > One root `python main.py` (mode by flag), `gcode/toolpath.py`, shared
 > `sequences/geometry.py`, a matplotlib toolpath + insert-motion preview
 > (`main.py --preview`), a "Plan magnet insert…" dialog that saves
-> `*.magnet.gcode`, and the panel polish (raw G-code, idle poll, extrude/retract,
-> progress bar). `GcodeRunner` skips firmware-pause codes (`M0`/`M1`/`M25`/`M600`/`M601`).
+> `*.magnet.gcode`, the panel polish (raw G-code, idle poll, extrude/retract,
+> progress bar), and a live-print view in the main panel (current layer + a
+> nozzle marker driven from G-code line progress, no extra printer traffic).
+> `GcodeRunner` skips firmware-pause codes (`M0`/`M1`/`M25`/`M600`/`M601`).
 > Printer serial link verified on real hardware (COM3). What remains for the magnet
 > flow is hardware: build the applicator, wire the Uno, measure the offset, run the
 > **manual** hardware smoke test. `.venv` first, always.
@@ -132,14 +135,14 @@ back-compat wrappers that call `entry` with a fixed mode.
 | `magnet_embed/links/dispenser_sim.py` | Simulated dispenser — returns `OK DISPENSE` / `ERR` like the real Uno. |
 | `magnet_embed/gcode/runner.py` | `GcodeRunner` — streams lines, waits for `ok`, detects + parses the sentinel, drops firmware-pause codes (`M0`/`M1`/`M25`/`M600`/`M601`), handles pause / resume / cancel. |
 | `magnet_embed/gcode/postprocess.py` | Inserts the `;MAGNET_INSERT X Y Z S<dir>` sentinel comment at a chosen layer / height. |
-| `magnet_embed/gcode/toolpath.py` | `parse_toolpath(path) -> Toolpath` — a slice as ordered `Segment`s (travel vs extrude), a layer→Z table (slicer markers, else Z-derived), bounding box, distances, rough time. Feeds the visualisation + the plan dialog. |
-| `magnet_embed/viz/toolpath_fig.py` | Pure preview helpers (`nozzle_waypoints`, `pole_waypoints`, `sample_polyline`, `state_at_z`) + matplotlib `draw_*` functions (layer X–Y, side X–Z, 3D path, phase-coloured insert overlay). No GUI backend. |
+| `magnet_embed/gcode/toolpath.py` | `parse_toolpath(path) -> Toolpath` — a slice as ordered `Segment`s (travel vs extrude, each carrying a 1-based `line_no`), a layer→Z table (slicer markers, else Z-derived), bounding box, distances, rough time. `progress_position(current_line)` / `progress_layer(current_line)` bisect the parsed path to the nozzle position/layer implied by how far `GcodeRunner` has streamed — no extra printer traffic. Feeds the visualisation, the plan dialog, and the panel's live-print view. |
+| `magnet_embed/viz/toolpath_fig.py` | Pure preview helpers (`nozzle_waypoints`, `pole_waypoints`, `sample_polyline`, `state_at_z`) + matplotlib `draw_*` functions (layer X–Y, side X–Z, 3D path, phase-coloured insert overlay, `draw_live_layer`/`update_live_marker` for the panel's live view). No GUI backend. |
 | `magnet_embed/viz/preview.py` | `PreviewWindow` (Tk `Toplevel`, matplotlib `FigureCanvasTkAgg`) — layer slider, play/scrub the nozzle + pole tip along `plan_insert_moves`, envelope violations flagged, "Open 3D view". `python main.py --preview FILE`. |
 | `magnet_embed/sequences/geometry.py` | `compute_targets` / `plan_insert_moves` / `check_envelope` / `pole_point` — the one place the insert-motion targets are computed. `insert_magnet` executes them; the preview + plan dialog draw and envelope-check the same numbers. |
 | `magnet_embed/sequences/insert_magnet.py` | The `SAVE → PARK → DISPENSE → APPROACH → PRESS → SHEAR → LIFT → ASK → RESUME` state machine. Targets come from `geometry.compute_targets`. |
-| `magnet_embed/app.py` | `Controller` — headless UI↔worker mediator (threads, queues, prompt blocking); optional `log_dir` writes a per-run transcript. |
+| `magnet_embed/app.py` | `Controller` — headless UI↔worker mediator (threads, queues, prompt blocking); optional `log_dir` writes a per-run transcript. `load_gcode()` caches a parsed `toolpath` + raw `gcode_lines` (best-effort — a parse failure logs and leaves them empty rather than blocking the load); `progress_point`/`current_line_text` derive the live nozzle position + current G-code line from them. |
 | `magnet_embed/runlog.py` | `RunLog` — one `logs/<ts>-<name>.log` per streamed job, a timestamped line per event, plus a human-readable `=== SUMMARY ===` block appended on `close()` (duration, lines sent/total, sentinels seen, any errors, final position + temps). `summary_text` is also echoed to the panel log right after a run finishes. |
-| `magnet_embed/ui/panel.py` | Tkinter panel — thin view over `Controller`; jog/home/Level-Bed + raw G-code entry idle-only, "Plan magnet insert…" and "Settings…" dialogs, modal Success/Retry/Abort prompt, live log. |
+| `magnet_embed/ui/panel.py` | Tkinter panel — thin view over `Controller`; jog/home/Level-Bed + raw G-code entry idle-only, "Plan magnet insert…" and "Settings…" dialogs, modal Success/Retry/Abort prompt, live log, an embedded live-print view (current layer + nozzle marker + current-step G-code text). |
 | `magnet_embed/ui/plan_dialog.py` | "Plan magnet insert" dialog + pure helpers — set pocket X/Y, seat Z, shear, target layer/Z; envelope-check; Preview; **Save `<stem>.magnet.gcode`** and load it. |
 | `magnet_embed/ui/settings_dialog.py` | "Settings" dialog — edit `printer.port`/`dispenser.port`/`magnet_tool_offset` from the panel, writes `config.local.yaml`. |
 | `dispenser_fw/` | Arduino Uno sketch for the magazine servo (Phase 2). |
@@ -319,7 +322,11 @@ hardware attached.
   `set_temp`'s `value` is range-checked against
   `config['temps'][{nozzle,bed}_{min,max}_c]` first — out of range or a link
   error both emit an `error` event, nothing is sent.
-- Properties: `connected`, `progress` → `(current_line, total_lines)`.
+- Properties: `connected`, `progress` → `(current_line, total_lines)`, `progress_point`
+  → the nozzle tip's `(x, y, z)` implied by that line progress against the cached
+  `toolpath` (`None` if no toolpath), `current_line_text` → the raw source line at
+  that progress (`""` if none), `toolpath`/`gcode_lines` (cached by `load_gcode()`,
+  best-effort).
 - Event kinds: `log`, `state` (a `PrinterState`), `prompt` (`"dispense"`/`"confirm"`),
   `done`, `error`.
 
@@ -327,10 +334,22 @@ hardware attached.
 - Thin Tkinter view over a `Controller`. Connect, load G-code, run/pause/resume/cancel,
   a run-progress bar, jog (0.1/1/10 mm) + home + "Level Bed…" (confirm dialog first
   — it moves the toolhead over the whole bed) + raw G-code entry + extrude/retract
-  **idle only**, "Plan magnet insert…", read-only log, live position/temp line.
-  Auto-refreshes state every `ui.idle_poll_s` while connected + idle.
-  `_show_prompt` opens a modal **Success / Retry / Abort** (or **Ready / Abort**)
-  dialog that calls `controller.answer_prompt`. Drains `poll_events()` every 120 ms.
+  **idle only**, "Plan magnet insert…", read-only log, live position/temp line, an
+  embedded **live-print view**. Auto-refreshes state every `ui.idle_poll_s` while
+  connected + idle. `_show_prompt` opens a modal **Success / Retry / Abort** (or
+  **Ready / Abort**) dialog that calls `controller.answer_prompt`. Drains
+  `poll_events()` every 120 ms.
+- **Live-print view** (`_sync_live_view`, C20) — a small `FigureCanvasTkAgg` embedded
+  directly in the panel (not a separate window) showing the active layer's toolpath
+  plus a marker at `controller.progress_point`, and a label under the canvas showing
+  `controller.current_line_text` — "what the current step looks like" as text, not
+  just a dot on the plot. Redraws the layer only when the active layer changes;
+  otherwise just moves the marker (`viz.toolpath_fig.update_live_marker`) — cheap
+  enough to run on a timer. Throttled off the existing 120 ms tick via
+  `ui.live_view_poll_s` (default 1.0 s; `0` disables), same pattern as `ui.idle_poll_s`.
+  Static (current layer, no marker) once a file loads; the marker tracks line progress
+  once a run starts and freezes at the final position when it ends. No extra printer
+  traffic — position comes from `Toolpath.progress_position`, not a polled `M114`.
 - Temperature panel is *not* idle-gated (`set_temp` works mid-print, see `app.py`):
   each of the nozzle/bed rows shows the allowed range from
   `config['temps'][{nozzle,bed}_{min,max}_c]` and a live `now: A/B°C` label

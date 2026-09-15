@@ -522,3 +522,39 @@ smoke test.
      off the matching Phase-3 items in `TODO.md` / `PROJECT_PLAN.md`.
 - All four committed individually (owner's request), local `main` 5 commits
   ahead of `origin/main` — not pushed.
+
+## 2026-09-15 (cont.) — Fixed stale TODO checkboxes; embedded live-print view (C20)
+
+- Owner asked what software/GUI work remained. Answer: Phase 1/1.5/1.6 chunks
+  (C1–C19) were all actually done; `TODO.md` still showed C8–C12 unchecked
+  with a dangling "see In Progress above" pointer even though `BUILD_PLAN.md`
+  showed C8 shipped and C9–C12's content folded into C13/C18. Fixed `TODO.md`
+  to match (two accurate checked lines, dead cross-reference dropped).
+- Owner then asked for a live view of print progress "like in the slicer" and
+  to flesh out the GUI with plots. Before writing code, asked two design
+  questions (`AskUserQuestion`): (1) how to get the nozzle's live position
+  during a stream — derive it from G-code line progress against the parsed
+  toolpath (no extra printer traffic) vs. poll real `M114` (accurate but
+  contends with the runner's own send/`ok` lock, the same trade-off C10's
+  idle-poll design deliberately avoided); owner picked line-progress. (2)
+  where the view lives — embedded in the main panel vs. a separate window;
+  owner picked embedded.
+- Implemented as **Phase 1.7 — C20** (`project/BUILD_PLAN.md`):
+  `gcode/toolpath.py` (`Segment.line_no`, `Toolpath.progress_position` /
+  `progress_layer`, bisect-cached in `__post_init__`), `viz/toolpath_fig.py`
+  (`draw_live_layer` / `update_live_marker`), `app.Controller` (`load_gcode()`
+  caches a `toolpath`, best-effort — a parse failure logs and leaves it `None`
+  rather than blocking the load; new `progress_point` property), `ui/panel.py`
+  (embedded `FigureCanvasTkAgg` "Live print view" frame, `_sync_live_view`,
+  throttled via a new `ui.live_view_poll_s` config key mirroring
+  `ui.idle_poll_s`). 209 tests (+11). `py_compile` clean.
+- Verified beyond the unit tests: wrote a driven-widget smoke test — a real
+  `ControlPanel` against a withdrawn `Tk` root and a sim printer, streaming
+  `tests/data/sample.gcode` end to end — confirming the live view actually
+  walks all 5 layers and the marker lands on the final move's endpoint, not
+  just that the pure helper functions work in isolation.
+- Docs synced: `TODO.md`, `project/BUILD_PLAN.md` (new Phase 1.7 / C20
+  section), `README.md` (status, test count, docs table), `.CLAUDE/CLAUDE.md`
+  (Running-the-system status line, module table rows for `toolpath.py` /
+  `toolpath_fig.py` / `app.py`, `ui/panel.py` Key Modules section).
+

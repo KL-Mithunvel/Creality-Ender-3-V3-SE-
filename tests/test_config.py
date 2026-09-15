@@ -74,6 +74,24 @@ def test_validate_rejects_bad_idle_poll():
         _validate(cfg)
 
 
+def test_ui_live_view_poll_default_present():
+    assert load_config()["ui"]["live_view_poll_s"] == 1.0
+
+
+def test_validate_rejects_bad_live_view_poll():
+    import pytest
+
+    from magnet_embed.config import _validate
+
+    cfg = load_config()
+    cfg["ui"]["live_view_poll_s"] = -1
+    with pytest.raises(ValueError):
+        _validate(cfg)
+    cfg["ui"]["live_view_poll_s"] = "fast"
+    with pytest.raises(ValueError):
+        _validate(cfg)
+
+
 def test_temp_range_defaults_present():
     cfg = load_config()
     assert cfg["temps"]["nozzle_min_c"] < cfg["temps"]["nozzle_max_c"]

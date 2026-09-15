@@ -70,6 +70,31 @@ def test_unmarked_file_is_layered_by_z(tmp_path):
     assert tp.layer_z == [0.2, 0.4, 0.6]
 
 
+def test_progress_position_tracks_line_number():
+    tp = parse_toolpath(DATA / "cura_sample.gcode")
+    first, last = tp.segments[0], tp.segments[-1]
+    assert tp.progress_position(0) == first.p0            # before the first move
+    assert tp.progress_position(first.line_no) == first.p1
+    assert tp.progress_position(last.line_no) == last.p1
+    assert tp.progress_position(10**6) == last.p1          # past EOF clamps to the end
+
+
+def test_progress_layer_matches_the_segment_at_that_line():
+    tp = parse_toolpath(DATA / "sample.gcode")
+    last = tp.segments[-1]
+    assert tp.progress_layer(0) == 0
+    assert tp.progress_layer(last.line_no) == last.layer
+
+
+def test_progress_position_on_empty_toolpath(tmp_path):
+    p = tmp_path / "empty.gcode"
+    p.write_text("; nothing but comments\n", encoding="utf-8")
+    tp = parse_toolpath(p)
+    assert tp.segments == []
+    assert tp.progress_position(5) == (0.0, 0.0, 0.0)
+    assert tp.progress_layer(5) == 0
+
+
 def test_relative_moves_and_g92(tmp_path):
     p = tmp_path / "rel.gcode"
     p.write_text(

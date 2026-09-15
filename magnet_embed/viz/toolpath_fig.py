@@ -130,6 +130,22 @@ def draw_path_3d(ax, tp: Toolpath, *, max_segments: int = 8000) -> None:
     ax.set_zlabel("Z")
 
 
+def draw_live_layer(ax, tp: Toolpath, layer: int) -> dict:
+    """Static layer geometry (like `draw_layer_xy`) plus an empty nozzle-position
+    marker artist for the panel's embedded live-print view. Returns
+    `{"marker": Line2D}`; move it with `update_live_marker` on each poll tick
+    instead of redrawing the whole layer, which is what makes per-tick updates
+    cheap enough to run during a stream.
+    """
+    draw_layer_xy(ax, tp, layer)
+    (marker,) = ax.plot([], [], "o", ms=7, color="#c53b3b", zorder=6)
+    return {"marker": marker}
+
+
+def update_live_marker(artists: dict, point: Point) -> None:
+    artists["marker"].set_data([point[0]], [point[1]])
+
+
 def _project(pt: Point, plane: str) -> tuple[float, float]:
     return (pt[0], pt[1]) if plane == "xy" else (pt[0], pt[2])
 

@@ -27,6 +27,7 @@ from .exceptions import (
     SequenceAborted,
 )
 from .gcode.runner import GcodeRunner
+from .gcode.toolpath import Toolpath, parse_toolpath
 from .links.base import DispenserLink, PrinterLink
 from .runlog import RunLog, new_run_log
 from .sequences.insert_magnet import insert_magnet
@@ -52,6 +53,8 @@ class Controller:
         self.log_dir = log_dir
         self.gcode_path: Path | None = None
         self.runner: GcodeRunner | None = None
+        self.toolpath: Toolpath | None = None
+        self.gcode_lines: list[str] = []
 
         self._events: "queue.Queue[Event]" = queue.Queue()
         self._answers: "queue.Queue[str]" = queue.Queue()
@@ -85,6 +88,26 @@ class Controller:
         """(current line, total lines) of the active/last run; (0, 0) before any run."""
         r = self.runner
         return (r.current_line, r.total_lines) if r is not None else (0, 0)
+
+    @property
+    def progress_point(self) -> tuple[float, float, float] | None:
+        """Nozzle tip position implied by how far the runner has streamed into
+        the loaded file, read off the parsed `toolpath` (no extra printer
+        traffic - see `Toolpath.progress_position`). `None` if no file with a
+        usable toolpath is loaded."""
+        if self.toolpath is None:
+            return None
+        current_line, _ = self.progress
+        return self.toolpath.progress_position(current_line)
+
+    @property
+    def current_line_text(self) -> str:
+        """Raw text of the source line the runner is currently on (1-based,
+        matches `progress`). Empty string before/without a loaded file, or
+        once past the end of the cached lines."""
+        current_line, _ = self.progress
+        idx = current_line - 1
+        return self.gcode_lines[idx] if 0 <= idx < len(self.gcode_lines) else ""
 
     def poll_events(self) -> list[Event]:
         """Return and clear every event queued since the last call (call from the UI)."""
@@ -121,6 +144,13 @@ class Controller:
             self._emit("log", "cannot load a file while a run is active")
             return
         self.gcode_path = Path(path)
+        try:
+            self.toolpath = parse_toolpath(self.gcode_path)
+            self.gcode_lines = self.gcode_path.read_text(encoding="utf-8").splitlines()
+        except Exception as exc:  # noqa: BLE001 - the live view is best-effort
+            self.toolpath = None
+            self.gcode_lines = []
+            self._emit("log", f"no toolpath preview ({exc})")
         self._emit("log", f"loaded {self.gcode_path.name}")
 
     def jog(self, axis: str, distance: float) -> None:

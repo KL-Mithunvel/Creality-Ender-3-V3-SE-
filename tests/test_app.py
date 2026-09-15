@@ -365,6 +365,55 @@ def test_set_temp_blocked_during_insert_sequence(config):
     _pump_until(ctl, "done")
 
 
+# --- C20: live-print view (toolpath cache + progress_point) --------
+
+def test_load_gcode_caches_a_toolpath(config):
+    ctl = _ctl(config)
+    assert ctl.toolpath is None
+    ctl.load_gcode(SAMPLE)
+    assert ctl.toolpath is not None
+    assert ctl.toolpath.layer_count > 0
+
+
+def test_progress_point_none_before_a_file_is_loaded(config):
+    ctl = _ctl(config)
+    assert ctl.progress_point is None
+
+
+def test_progress_point_tracks_progress_during_a_run(config):
+    ctl = _ctl(config, delay=0.03)
+    ctl.load_gcode(SAMPLE)
+    ctl.start_run()
+    assert _wait(lambda: ctl.progress[0] > 0)
+    ctl.pause()
+    time.sleep(0.1)  # let the in-flight line finish so current_line settles
+    current_line, _ = ctl.progress
+    assert ctl.progress_point == ctl.toolpath.progress_position(current_line)
+    ctl.resume()
+    _pump_until(ctl, "done", answer="success")
+
+
+def test_load_gcode_survives_a_bad_path_while_idle(config):
+    ctl = _ctl(config)
+    ctl.load_gcode("no_such_file.gcode")
+    assert ctl.toolpath is None
+    assert any(k == "log" and "no toolpath preview" in str(p) for k, p in ctl.poll_events())
+
+
+def test_current_line_text_tracks_progress(config):
+    ctl = _ctl(config, delay=0.03)
+    assert ctl.current_line_text == ""
+    ctl.load_gcode(SAMPLE)
+    ctl.start_run()
+    assert _wait(lambda: ctl.progress[0] > 0)
+    ctl.pause()
+    time.sleep(0.1)
+    current_line, _ = ctl.progress
+    assert ctl.current_line_text == ctl.gcode_lines[current_line - 1]
+    ctl.resume()
+    _pump_until(ctl, "done", answer="success")
+
+
 def test_progress_zero_then_advances_then_final(config):
     ctl = _ctl(config, delay=0.02)
     assert ctl.progress == (0, 0)

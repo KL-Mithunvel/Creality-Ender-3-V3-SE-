@@ -66,6 +66,7 @@ sequence:
 
 ui:
   idle_poll_s: 2.0         # panel auto-refreshes position + temps this often while idle; 0 disables
+  live_view_poll_s: 1.0    # panel redraws the embedded live-print view this often during a run; 0 disables
 
 gcode:
   sentinel_token: ";MAGNET_INSERT"

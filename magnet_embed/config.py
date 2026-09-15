@@ -109,6 +109,12 @@ def _validate(config: dict) -> None:
     if isinstance(poll, bool) or not isinstance(poll, (int, float)) or poll < 0:
         raise ValueError(f"config ui.idle_poll_s must be a number >= 0, got {poll!r}")
 
+    live_poll = config.get("ui", {}).get("live_view_poll_s", 0)
+    if isinstance(live_poll, bool) or not isinstance(live_poll, (int, float)) or live_poll < 0:
+        raise ValueError(
+            f"config ui.live_view_poll_s must be a number >= 0, got {live_poll!r}"
+        )
+
 
 def local_config_path(path: str | Path | None = None) -> Path:
     """Where `config.local.yaml` lives for a given base `config.yaml` path."""

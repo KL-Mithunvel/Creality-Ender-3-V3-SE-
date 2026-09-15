@@ -13,6 +13,10 @@ criteria, risks). Architecture and rules: `.CLAUDE/CLAUDE.md`. Keep all three in
 
 ## Done
 
+- [x] **Phase 1.7 — C20** (`project/BUILD_PLAN.md`) — embedded live-print view in the
+      main panel: current layer + a nozzle-position marker + a current-step G-code
+      text readout, driven from G-code line progress against the parsed toolpath
+      (no extra printer traffic); 209 tests.
 - [x] **Phase 1.6 — C13–C19** (`project/BUILD_PLAN.md`) — 170 tests:
       C13 root `main.py` + `magnet_embed/entry.py` + `Controller.send_command`;
       C14 `gcode/toolpath.py`; C15 `sequences/geometry.py` (`plan_insert_moves` /

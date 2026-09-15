@@ -35,6 +35,7 @@ class Segment:
     extruding: bool          # filament advancing while XY moves (a printed line)
     layer: int               # 0-based layer index
     feed: float              # mm/min in effect for this move (0 if never set)
+    line_no: int              # 1-based source line number (matches GcodeRunner.current_line)
 
     @property
     def length(self) -> float:
@@ -47,6 +48,34 @@ class Toolpath:
     layer_z: list[float]        # height of each layer index, ascending
     bbox_min: Point            # over extruding moves (falls back to all moves)
     bbox_max: Point
+
+    def __post_init__(self) -> None:
+        # segments are produced by one top-to-bottom parse, so line_no is
+        # already ascending - cache it once for the live-progress bisect.
+        self._line_nos = [s.line_no for s in self.segments]
+
+    def progress_position(self, current_line: int) -> Point:
+        """Nozzle tip position after the runner has processed through source
+        line `current_line` (1-based, matching `GcodeRunner.current_line`).
+
+        Derived entirely from the already-parsed path - no extra printer
+        traffic - so the panel's live view can poll it cheaply while streaming.
+        Before the first move, returns that move's start point (or the origin
+        for a file with no moves at all).
+        """
+        if not self.segments:
+            return (0.0, 0.0, 0.0)
+        idx = bisect.bisect_right(self._line_nos, current_line) - 1
+        if idx < 0:
+            return self.segments[0].p0
+        return self.segments[idx].p1
+
+    def progress_layer(self, current_line: int) -> int:
+        """Layer index active at `current_line` (see `progress_position`)."""
+        if not self.segments:
+            return 0
+        idx = bisect.bisect_right(self._line_nos, current_line) - 1
+        return self.segments[max(idx, 0)].layer
 
     @property
     def layer_count(self) -> int:
@@ -171,7 +200,9 @@ def parse_toolpath(path: str | Path) -> Toolpath:
             cur_layer = len(z_layers) - 1
 
         if moved:
-            segments.append(Segment((x, y, z), (nx, ny, nz), extruding, max(cur_layer, 0), feed))
+            segments.append(
+                Segment((x, y, z), (nx, ny, nz), extruding, max(cur_layer, 0), feed, i + 1)
+            )
             for pt in ((x, y, z), (nx, ny, nz)):
                 for c in range(3):
                     amin[c] = min(amin[c], pt[c])

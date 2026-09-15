@@ -9,7 +9,7 @@ chunks. Each chunk: build → `pytest` green → stage → commit.
 |--|--|
 | Owner | kl mithunvel |
 | Created | 2026-09-09 |
-| Status | **C1–C8 + Phase 1.6 (C13–C19) done — 170 tests.** One root `python main.py` (mode by flag), bring-your-own-G-code, toolpath + insert-motion preview, "Plan magnet insert…" dialog, panel polish. Magnet-flow hardware smoke test still pending the applicator build. |
+| Status | **C1–C8 + Phase 1.6 (C13–C19) + C20 done — 209 tests.** One root `python main.py` (mode by flag), bring-your-own-G-code, toolpath + insert-motion preview, "Plan magnet insert…" dialog, panel polish, an embedded live-print view (current layer + nozzle marker + current-step G-code text) during a run. Magnet-flow hardware smoke test still pending the applicator build. |
 | Overall plan | `project/PROJECT_PLAN.md` |
 | Architecture / rules | `.CLAUDE/CLAUDE.md` |
 
@@ -670,6 +670,77 @@ any sequence path; every module `py_compile`s; `SimPrinter`↔`SerialPrinter` an
   clean. Sanity checklist (Dev-Rule scan: no `G28`/`M0` in sequence paths, config
   fully read, sim↔serial API parity, exceptions raised somewhere) recorded in
   `.CLAUDE/CLAUDE-LOG.md`.
+
+---
+
+## Phase 1.7 — Embedded live-print view
+
+**Why.** Watching the progress bar tick up doesn't show *where on the part* the
+head currently is. The separate C16 preview window already draws the toolpath
+and animates the planned insert motion, but only before a run starts — nothing
+showed the live position while a print was actually streaming, closer to what a
+slicer's progress view gives you.
+
+---
+
+### C20 — Live-print view embedded in the main panel  ✅
+
+**Goal.** A small canvas in the main panel, always present, that shows the
+current layer's toolpath with a marker at the nozzle's current position while a
+run streams — no separate window, no extra printer traffic.
+
+**Design decision (owner-confirmed).** Position comes from **G-code line
+progress**, not a polled `M114`: `GcodeRunner.current_line` (already tracked,
+already exposed via `Controller.progress`) is mapped onto the already-parsed
+`Toolpath`, so the live view costs zero extra serial round-trips and never
+contends with the streaming loop's send/`ok` lock — the same trade-off already
+made for C10's idle poll, just resolved the other way here since a live view
+ticking every ~1 s doesn't need `M114`-grade precision. The view lives directly
+in the main panel (not a Toplevel), matching "watch it while the print runs."
+
+**Done:**
+- `gcode/toolpath.py` — `Segment` gained `line_no` (1-based, matches
+  `GcodeRunner.current_line`); `Toolpath.progress_position(current_line)` and
+  `Toolpath.progress_layer(current_line)` bisect the (already line-ascending)
+  segment list to the last completed move — no per-call rebuild, cached in
+  `__post_init__`.
+- `viz/toolpath_fig.py` — `draw_live_layer(ax, tp, layer)` (the C14 layer view
+  plus an empty marker artist) + `update_live_marker(artists, point)` (move the
+  marker without redrawing the whole layer — what keeps per-tick updates cheap).
+- `app.Controller` — caches `self.toolpath` on `load_gcode()` (best-effort: a
+  parse failure logs `"no toolpath preview (...)"` and leaves `toolpath = None`
+  rather than blocking the load, since the live view is optional, not required
+  to run); `progress_point` property = `toolpath.progress_position(current_line)`,
+  `None` with no usable toolpath.
+- `ui/panel.py` — a "Live print view" `LabelFrame` embedding a small
+  `FigureCanvasTkAgg`; `_sync_live_view()` redraws the layer on a layer change,
+  else just moves the marker; throttled off the existing `_tick` counter via a
+  new `ui.live_view_poll_s` config key (same pattern as `ui.idle_poll_s`;
+  default 1.0 s, `0` disables). Static (current layer, no marker) once a file
+  loads; marker starts moving once a run starts; freezes at the final position
+  when the run ends.
+- `config.yaml` / `config.py` — `ui.live_view_poll_s`, validated like
+  `idle_poll_s` (number ≥ 0).
+- Tests: `test_toolpath.py` (+3: line-progress bisect, layer lookup, empty
+  toolpath), `test_viz.py` (+1: marker artist headless), `test_app.py` (+5:
+  toolpath caching, `progress_point` before/during a run, a bad path doesn't
+  block `load_gcode`, current-step text tracks progress), `test_config.py`
+  (+2: default + validation). **209 tests.**
+- Manual: a driven-widget smoke test (`ControlPanel` against a real `Tk` root,
+  sim printer, `tests/data/sample.gcode`) confirmed the live view walks all 5
+  layers and the marker lands on the last move's endpoint — not just unit-level
+  pieces in isolation.
+
+**Not built (documented, deferred):** a 3D live view (the C16 3D window stays
+separate/static); showing the *planned remaining* path ahead of the marker
+(today only what's been streamed is drawn, matching "how much is done", not
+"what's left" — a possible follow-up).
+
+**Follow-on (same session):** a "current step" label under the canvas showing
+the raw text of the G-code line the runner is currently on
+(`Controller.current_line_text`, from a `gcode_lines` cache also filled in
+`load_gcode()`) — "what the current step looks like" as text alongside the
+plot, not just a dot on it.
 
 ---
 

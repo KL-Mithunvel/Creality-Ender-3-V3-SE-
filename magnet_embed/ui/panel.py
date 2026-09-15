@@ -3,6 +3,11 @@
 Thin view over `magnet_embed.app.Controller`: buttons call the controller's
 action methods; a 120 ms timer drains `controller.poll_events()` and updates the
 widgets. All Tkinter work stays on the main thread.
+
+Embeds a small live-print view (current layer + nozzle marker, `_sync_live_view`)
+driven off `Controller.toolpath` / `progress_point` - derived from G-code line
+progress against the parsed toolpath, so it costs no extra printer traffic and
+never contends with the streaming loop's own serial handshake.
 """
 
 from __future__ import annotations
@@ -10,8 +15,12 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import filedialog, messagebox, scrolledtext, ttk
 
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.figure import Figure
+
 from ..app import Controller
 from ..state import PrinterState
+from ..viz import toolpath_fig as tf
 
 _JOG_STEPS = (0.1, 1.0, 10.0)
 _POLL_MS = 120
@@ -26,6 +35,11 @@ class ControlPanel(ttk.Frame):
         self._tick = 0
         poll_s = float(controller.config.get("ui", {}).get("idle_poll_s", 0) or 0)
         self._idle_poll_ticks = round(poll_s * 1000 / _POLL_MS) if poll_s > 0 else 0
+        live_poll_s = float(controller.config.get("ui", {}).get("live_view_poll_s", 0) or 0)
+        self._live_view_ticks = round(live_poll_s * 1000 / _POLL_MS) if live_poll_s > 0 else 0
+        self._live_tp = None
+        self._live_layer = -1
+        self._live_art: dict = {}
         self._build()
         self.after(_POLL_MS, self._poll)
 
@@ -67,6 +81,16 @@ class ControlPanel(ttk.Frame):
         self.progressbar.pack(side="left", fill="x", expand=True)
         self.prog_lbl = ttk.Label(prog, text="—", width=20)
         self.prog_lbl.pack(side="left", padx=6)
+        row += 1
+
+        live = ttk.LabelFrame(self, text="Live print view  (current layer, nozzle position)", padding=4)
+        live.grid(row=row, column=0, sticky="ew", pady=(0, 4))
+        self.live_fig = Figure(figsize=(4.6, 3.0), dpi=90)
+        self.live_ax = self.live_fig.add_subplot(1, 1, 1)
+        self.live_canvas = FigureCanvasTkAgg(self.live_fig, master=live)
+        self.live_canvas.get_tk_widget().pack(fill="both", expand=True)
+        self.live_line_lbl = ttk.Label(live, text="current step: —", anchor="w")
+        self.live_line_lbl.pack(fill="x", pady=(4, 0))
         row += 1
 
         jog = ttk.LabelFrame(self, text="Jog / home  (idle only)", padding=6)
@@ -193,6 +217,34 @@ class ControlPanel(ttk.Frame):
             self.c.load_gcode(path)
             self.file_lbl.configure(text=path.rsplit("/", 1)[-1])
 
+    def _sync_live_view(self) -> None:
+        """Redraw the embedded live-print canvas: the active layer's toolpath
+        plus a marker at the nozzle position implied by how far the run has
+        streamed (`Controller.progress_point` - derived from line progress
+        against the parsed toolpath, no extra printer traffic). Static (just
+        the loaded file's current layer, no marker) before/after a run."""
+        tp = self.c.toolpath
+        if tp is None:
+            return
+        if tp is not self._live_tp:
+            self._live_tp = tp
+            self._live_layer = -1
+        current_line, total = self.c.progress
+        layer = tp.progress_layer(current_line) if total else 0
+        if layer != self._live_layer:
+            self._live_layer = layer
+            self._live_art = tf.draw_live_layer(self.live_ax, tp, layer)
+            self.live_fig.tight_layout()
+        if total:
+            tf.update_live_marker(self._live_art, tp.progress_position(current_line))
+        self.live_canvas.draw_idle()
+
+        text = self.c.current_line_text.strip()
+        self.live_line_lbl.configure(
+            text=f"current step (line {current_line}/{total}): {text or '(comment/blank)'}"
+            if total else "current step: not running"
+        )
+
     def log(self, message: str) -> None:
         self.logbox.configure(state="normal")
         self.logbox.insert("end", message + "\n")
@@ -225,6 +277,13 @@ class ControlPanel(ttk.Frame):
             and self._tick % self._idle_poll_ticks == 0
         ):
             self.c.refresh_state()  # safe during a run too - see Controller.refresh_state
+
+        if (
+            self._live_view_ticks
+            and self.c.toolpath is not None
+            and self._tick % self._live_view_ticks == 0
+        ):
+            self._sync_live_view()
 
         if self.c.running:
             done, total = self.c.progress

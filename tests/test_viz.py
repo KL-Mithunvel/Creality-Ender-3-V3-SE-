@@ -77,3 +77,17 @@ def test_draw_functions_run_headless(cfg):
 
 def test_preview_module_imports():
     import magnet_embed.viz.preview  # noqa: F401
+
+
+def test_draw_live_layer_and_update_marker():
+    tp = parse_toolpath(DATA / "sample.gcode")
+    fig = Figure()
+    ax = fig.add_subplot(1, 1, 1)
+    art = tf.draw_live_layer(ax, tp, 2)
+    assert "marker" in art
+    assert len(art["marker"].get_xdata()) == 0   # empty until the first update
+
+    pt = tp.progress_position(tp.segments[-1].line_no)
+    tf.update_live_marker(art, pt)
+    assert list(art["marker"].get_xdata()) == [pt[0]]
+    assert list(art["marker"].get_ydata()) == [pt[1]]
