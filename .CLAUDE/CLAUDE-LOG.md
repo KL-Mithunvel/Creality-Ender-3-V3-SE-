@@ -472,3 +472,53 @@ smoke test.
   ceiling).
 - Not done yet: live temp polling *during* an ordinary print (would need a
   periodic locked `M105` on a Tk timer); still no applicator/Uno on the bench.
+
+## 2026-09-15 (cont.) — First-layer root cause; 4 GUI/software polish commits
+
+- Owner reported a poor first layer on the `Cube_PETG_7m59s.gcode` test print
+  and asked to check the homing sequence against Creality's own code/docs, and
+  suspected the Z-offset. Pulled the file's embedded start G-code and
+  Creality's official firmware source (`github.com/CrealityOfficial/Ender-3V3-SE`):
+  - Homing is fine — `Z_SAFE_HOMING` is enabled with a bed-center XY point, so
+    a bare `G28` (what both the slicer and `Controller.home()` send) homes X,
+    Y, then Z via the CR-Touch at bed center. Not a bug.
+  - Real cause: `RESTORE_LEVELING_AFTER_G28` is **disabled** in the stock
+    firmware (`Configuration.h` line 1521) while `AUTO_BED_LEVELING_BILINEAR`
+    is on, so `G28` turns mesh compensation back off; the slicer's start
+    G-code (`machine_start_gcode`) never sends `M420 S1` to re-enable it. That
+    print ran the whole time with an uncorrected mesh against whatever tilt
+    the bed actually has. Nothing in `magnet_embed` causes or fixes this -
+    `GcodeRunner` streams `G28`/`G29`/`M420` through unmodified.
+  - Also confirmed (same source): Z-offset itself is set via Creality's
+    proprietary one-touch sensor pad (`USE_AUTOZ_TOOL_2`, enabled), calibrated
+    from the touchscreen, not from the host.
+  - Recommended fix (outside this repo): add `M420 S1` right after `G28` in
+    Creality Print's start G-code.
+- Asked "start building all the required software... gui and so on" - too
+  open-ended to act on; asked a clarifying question, owner picked "GUI/software
+  polish only" then "all three, one at a time, commit the intermediates."
+  Delivered as four separate commits:
+  1. **`53b02a8`** - `refresh_state()` no longer idle-only (it's read-only:
+     `M105`/`M400`/`M114`), so the panel's `now:` temp labels stay live through
+     an ordinary print, not just after an explicit action. Blocked only during
+     an active insert (`_in_insert`). 186 tests.
+  2. **`b29f328`** - owner's mid-turn ask, tying directly to the root-cause
+     finding above: a **"Level Bed…"** panel button
+     (`Controller.level_bed` = `G28`→`G29`→`M420 S1`→`M500`, idle-only,
+     confirm dialog first since it can take a couple of minutes). Documented
+     the caveat clearly: this does **not** survive the print's own `G28`
+     unless the slicer's start G-code (or a future `GcodeRunner` change)
+     re-sends `M420 S1` after it - the button fixes/refreshes the saved mesh,
+     it doesn't by itself fix a print run today. 189 tests.
+  3. **`e2b4c14`** - `RunLog.close()` now appends a human-readable
+     `=== SUMMARY ===` block (duration, lines sent/total, sentinels seen, any
+     errors, final position + temps); echoed to the panel log right after a
+     run finishes. 194 tests.
+  4. **`73b11fc`** - new **Settings…** dialog (`ui/settings_dialog.py`) edits
+     `printer.port`/`dispenser.port`/`magnet_tool_offset` and writes
+     `config.local.yaml` via the new `config.save_local_override` (deep-merge,
+     never touches the committed `config.yaml`); offset changes apply on the
+     next insert immediately, port changes need a restart. 198 tests. Checked
+     off the matching Phase-3 items in `TODO.md` / `PROJECT_PLAN.md`.
+- All four committed individually (owner's request), local `main` 5 commits
+  ahead of `origin/main` — not pushed.
