@@ -240,8 +240,8 @@ the printer-driven press + lateral shear on real parts.
 - [ ] Failure recovery: magazine jam, empty magazine, serial disconnect mid-pause
 - [ ] Multi-magnet parts: multiple sentinels, per-sentinel park + shear direction
 - [ ] Optional hall sensor on the pole to confirm the magnet left (replace/augment the operator check)
-- [ ] In-panel config editing instead of hand-edited YAML
-- [ ] Run log / print report written to `logs/`
+- [x] In-panel config editing instead of hand-edited YAML (`ui/settings_dialog.py`)
+- [x] Run log / print report written to `logs/` (`RunLog` summary block, C-2026-09-15)
 
 ---
 

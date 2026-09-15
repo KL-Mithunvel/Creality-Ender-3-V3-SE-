@@ -39,6 +39,7 @@ class ControlPanel(ttk.Frame):
         ttk.Button(top, text="Connect", command=self.c.connect).pack(side="left")
         self.status = ttk.Label(top, text="not connected")
         self.status.pack(side="left", padx=8)
+        ttk.Button(top, text="Settings…", command=self._open_settings).pack(side="left", padx=(12, 0))
         row += 1
 
         files = ttk.Frame(self)
@@ -166,6 +167,10 @@ class ControlPanel(ttk.Frame):
             parent=self,
         ):
             self.c.level_bed()
+
+    def _open_settings(self) -> None:
+        from .settings_dialog import SettingsDialog
+        SettingsDialog(self.winfo_toplevel(), self.c)
 
     def _plan_insert(self) -> None:
         if self.c.gcode_path is None or self.c.running:

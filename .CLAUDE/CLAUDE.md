@@ -60,8 +60,8 @@ involvement is acceptable at this stage.
 ## Running the System
 
 > Build status: **C1–C8 + Phase 1.6 (C13–C19) done, plus mid-print temp control,
-> a Level Bed button, and a run-report summary in the log — 194 tests**
-> (`project/BUILD_PLAN.md`).
+> a Level Bed button, a run-report summary in the log, and in-panel config
+> editing — 198 tests** (`project/BUILD_PLAN.md`).
 > One root `python main.py` (mode by flag), `gcode/toolpath.py`, shared
 > `sequences/geometry.py`, a matplotlib toolpath + insert-motion preview
 > (`main.py --preview`), a "Plan magnet insert…" dialog that saves
@@ -139,8 +139,9 @@ back-compat wrappers that call `entry` with a fixed mode.
 | `magnet_embed/sequences/insert_magnet.py` | The `SAVE → PARK → DISPENSE → APPROACH → PRESS → SHEAR → LIFT → ASK → RESUME` state machine. Targets come from `geometry.compute_targets`. |
 | `magnet_embed/app.py` | `Controller` — headless UI↔worker mediator (threads, queues, prompt blocking); optional `log_dir` writes a per-run transcript. |
 | `magnet_embed/runlog.py` | `RunLog` — one `logs/<ts>-<name>.log` per streamed job, a timestamped line per event, plus a human-readable `=== SUMMARY ===` block appended on `close()` (duration, lines sent/total, sentinels seen, any errors, final position + temps). `summary_text` is also echoed to the panel log right after a run finishes. |
-| `magnet_embed/ui/panel.py` | Tkinter panel — thin view over `Controller`; jog/home + raw G-code entry idle-only, "Plan magnet insert…" dialog, modal Success/Retry/Abort prompt, live log. |
+| `magnet_embed/ui/panel.py` | Tkinter panel — thin view over `Controller`; jog/home/Level-Bed + raw G-code entry idle-only, "Plan magnet insert…" and "Settings…" dialogs, modal Success/Retry/Abort prompt, live log. |
 | `magnet_embed/ui/plan_dialog.py` | "Plan magnet insert" dialog + pure helpers — set pocket X/Y, seat Z, shear, target layer/Z; envelope-check; Preview; **Save `<stem>.magnet.gcode`** and load it. |
+| `magnet_embed/ui/settings_dialog.py` | "Settings" dialog — edit `printer.port`/`dispenser.port`/`magnet_tool_offset` from the panel, writes `config.local.yaml`. |
 | `dispenser_fw/` | Arduino Uno sketch for the magazine servo (Phase 2). |
 | `tests/` | `pytest` — runner, postprocess, insert state machine, printer sim, dispenser sim. |
 
@@ -255,6 +256,16 @@ hardware attached.
 - Understands Cura / Creality Print (`;LAYER:<n>`) and PrusaSlicer (`;LAYER_CHANGE` + `;Z:<h>`) markers.
 - CLI: `python -m magnet_embed.gcode.postprocess <file> (--layer N | --z H) --xy PX PY --seat-z SZ --shear +X|-X|+Y|-Y [--pause] [-o OUT]`.
 - Or use the panel's **Plan magnet insert…** dialog (`ui/plan_dialog.py`).
+
+### `ui/settings_dialog.py`
+- `SettingsDialog` + pure helper `build_updates`. Edits `printer.port`,
+  `dispenser.port`, `magnet_tool_offset.{x,y,z}` and writes them via
+  `config.save_local_override` (deep-merged onto `config.local.yaml`, the
+  committed `config.yaml` is never touched). Reloads `controller.config` on
+  save so an offset change applies to the very next insert immediately; a
+  port change needs an app restart (the link objects are already constructed
+  with the old port — see `entry.build_links`). Opened from the panel's
+  "Settings…" button.
 
 ### `ui/plan_dialog.py`
 - `PlanInsertDialog` + pure helpers `resolve_target_z`, `magnet_output_path`,

@@ -91,5 +91,5 @@ Chunked in `project/BUILD_PLAN.md` — one commit per chunk.
 - [ ] Failure recovery (magazine jam, empty magazine, disconnect mid-pause)
 - [ ] Multi-magnet parts (multiple sentinels, per-sentinel park + shear)
 - [ ] Optional hall sensor to confirm deposit
-- [ ] In-panel config editing
-- [ ] Run log / print report to `logs/`
+- [x] In-panel config editing (`ui/settings_dialog.py` — port + magnet-offset, writes `config.local.yaml`)
+- [x] Run log / print report to `logs/` (`RunLog` summary block)

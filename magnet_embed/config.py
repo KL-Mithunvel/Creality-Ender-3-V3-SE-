@@ -110,6 +110,29 @@ def _validate(config: dict) -> None:
         raise ValueError(f"config ui.idle_poll_s must be a number >= 0, got {poll!r}")
 
 
+def local_config_path(path: str | Path | None = None) -> Path:
+    """Where `config.local.yaml` lives for a given base `config.yaml` path."""
+    base_path = Path(path) if path is not None else DEFAULT_CONFIG_PATH
+    return base_path.with_name("config.local.yaml")
+
+
+def save_local_override(updates: dict, path: str | Path | None = None) -> dict:
+    """Deep-merge `updates` onto the existing `config.local.yaml` (creating it
+    if absent) and write it back. Never touches the committed `config.yaml` -
+    see Key Conventions -> Config precedence. Returns the merged local dict."""
+    local_path = local_config_path(path)
+    if local_path.exists():
+        with open(local_path, "r", encoding="utf-8") as fh:
+            existing = yaml.safe_load(fh) or {}
+    else:
+        existing = {}
+    merged = _deep_merge(existing, updates)
+    local_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(local_path, "w", encoding="utf-8") as fh:
+        yaml.safe_dump(merged, fh, sort_keys=False)
+    return merged
+
+
 def load_config(path: str | Path | None = None) -> dict[str, Any]:
     """Load the base config, deep-merge `config.local.yaml` if present, validate.
 

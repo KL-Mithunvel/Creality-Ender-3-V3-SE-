@@ -1,4 +1,6 @@
-from magnet_embed.config import _deep_merge, load_config
+import yaml
+
+from magnet_embed.config import _deep_merge, load_config, save_local_override
 
 
 def test_deep_merge_recurses_and_does_not_mutate():
@@ -92,3 +94,29 @@ def test_validate_rejects_bad_temp_range():
     cfg["temps"]["bed_min_c"] = cfg["temps"]["bed_max_c"] + 1
     with pytest.raises(ValueError):
         _validate(cfg)
+
+
+# --- save_local_override (Settings dialog) ---------------------------
+
+def test_save_local_override_creates_file(tmp_path):
+    base = tmp_path / "config.yaml"
+    base.write_text("printer: {port: COM3}\n", encoding="utf-8")
+    merged = save_local_override({"printer": {"port": "COM9"}}, base)
+    assert merged["printer"]["port"] == "COM9"
+
+    local = tmp_path / "config.local.yaml"
+    assert local.exists()
+    assert yaml.safe_load(local.read_text())["printer"]["port"] == "COM9"
+
+
+def test_save_local_override_merges_with_existing(tmp_path):
+    base = tmp_path / "config.yaml"
+    base.write_text("printer: {port: COM3}\n", encoding="utf-8")
+    local = tmp_path / "config.local.yaml"
+    local.write_text("printer: {port: COM9}\nmagnet_tool_offset: {x: 1}\n", encoding="utf-8")
+
+    save_local_override({"magnet_tool_offset": {"y": 2}}, base)
+
+    data = yaml.safe_load(local.read_text())
+    assert data["printer"]["port"] == "COM9"          # untouched
+    assert data["magnet_tool_offset"] == {"x": 1, "y": 2}
