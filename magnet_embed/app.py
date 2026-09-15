@@ -18,7 +18,7 @@ import queue
 import threading
 from pathlib import Path
 
-from .config import load_config
+from .config import load_config, save_local_override
 from .exceptions import (
     AckTimeout,
     DispenserError,
@@ -282,6 +282,71 @@ class Controller:
             return
         self._emit("log", "bed leveling complete: probed, enabled, saved to EEPROM")
         self._emit_state()
+
+    def start_z_calibration(self) -> None:
+        """Home, then travel to `config.zcal.{x,y,start_z}` - the starting point
+        for a paper-test Z-offset calibration (see `ui/zcal_dialog.py`). Idle
+        only, like `home()`/`level_bed()`."""
+        if self.running:
+            self._emit("log", "Z calibration ignored - a run is active")
+            return
+        zc = self.config["zcal"]
+        feed = self.config["travel"]["feed"]
+        try:
+            self.printer.command("G28")
+            self.printer.command(
+                f"G1 X{zc['x']:g} Y{zc['y']:g} Z{zc['start_z']:g} F{feed:g}"
+            )
+        except (PrinterError, AckTimeout, ResendRequested) as exc:
+            self._emit("error", f"{type(exc).__name__}: {exc}")
+            return
+        self._emit(
+            "log",
+            f"Z calibration: homed, at X{zc['x']:g} Y{zc['y']:g} Z{zc['start_z']:g} "
+            "- nudge down carefully with a sheet of paper under the nozzle",
+        )
+        self._emit_state()
+
+    def nudge_z(self, delta: float) -> None:
+        """Fine relative Z move for Z-offset calibration, at `config.zcal.feed`
+        (deliberately slow). Idle only."""
+        if self.running:
+            self._emit("log", "Z nudge ignored - a run is active")
+            return
+        feed = self.config["zcal"]["feed"]
+        try:
+            self.printer.command("G91")
+            self.printer.command(f"G1 Z{delta:g} F{feed:g}")
+            self.printer.command("G90")
+        except (PrinterError, AckTimeout, ResendRequested) as exc:
+            self._emit("error", f"{type(exc).__name__}: {exc}")
+            return
+        self._emit_state()
+
+    def save_z_offset(self, cumulative_delta: float) -> None:
+        """Apply `cumulative_delta` (mm nudged since `start_z_calibration`) to
+        the trusted `config.zcal.probe_z_offset`, push the result to the
+        firmware (`M851` + `M500`), and persist it to `config.local.yaml` -
+        same "config is the source of truth" pattern as `magnet_tool_offset`
+        (Settings dialog), not a value read back from the printer (the exact
+        M851 report text for this firmware fork is unverified - see
+        `.CLAUDE/CLAUDE.md` -> Known Technical Debt). Idle only."""
+        if self.running:
+            self._emit("log", "Z offset save ignored - a run is active")
+            return
+        new_offset = round(self.config["zcal"]["probe_z_offset"] + cumulative_delta, 3)
+        try:
+            self.printer.command(f"M851 Z{new_offset:g}")
+            self.printer.command("M500")
+        except (PrinterError, AckTimeout, ResendRequested) as exc:
+            self._emit("error", f"{type(exc).__name__}: {exc}")
+            return
+        save_local_override({"zcal": {"probe_z_offset": new_offset}})
+        self.config["zcal"]["probe_z_offset"] = new_offset
+        self._emit(
+            "log",
+            f"Z offset saved: {new_offset:g} mm (M851 + M500 sent; config.local.yaml updated)",
+        )
 
     def start_run(self) -> None:
         if self.running:

@@ -59,10 +59,10 @@ involvement is acceptable at this stage.
 
 ## Running the System
 
-> Build status: **C1–C8 + Phase 1.6 (C13–C19) + Phase 1.7 (C20) done, plus
-> mid-print temp control, a Level Bed button, a run-report summary in the log,
-> in-panel config editing, and an embedded live-print view — 209 tests**
-> (`project/BUILD_PLAN.md`).
+> Build status: **C1–C8 + Phase 1.6 (C13–C19) + Phase 1.7 (C20) + Phase 1.8
+> (C21) done, plus mid-print temp control, a Level Bed button, a run-report
+> summary in the log, in-panel config editing, an embedded live-print view,
+> and a guided Z-offset calibration dialog — 218 tests** (`project/BUILD_PLAN.md`).
 > One root `python main.py` (mode by flag), `gcode/toolpath.py`, shared
 > `sequences/geometry.py`, a matplotlib toolpath + insert-motion preview
 > (`main.py --preview`), a "Plan magnet insert…" dialog that saves
@@ -121,7 +121,7 @@ back-compat wrappers that call `entry` with a fixed mode.
 
 | Path | Role |
 |------|------|
-| `magnet_embed/config.yaml` | All ports, baud, park/safe-Z, temps (incl. `nozzle_min_c`/`nozzle_max_c`/`bed_min_c`/`bed_max_c` guard rails for `set_temp`), the magnet-tool XYZ offset, press/shear distances + feeds, sentinel token. Nothing hardware-specific is hardcoded elsewhere. |
+| `magnet_embed/config.yaml` | All ports, baud, park/safe-Z, temps (incl. `nozzle_min_c`/`nozzle_max_c`/`bed_min_c`/`bed_max_c` guard rails for `set_temp`), the magnet-tool XYZ offset, press/shear distances + feeds, sentinel token, `zcal.*` (Z-offset calibration point/step/feed and the trusted `probe_z_offset`). Nothing hardware-specific is hardcoded elsewhere. |
 | `main.py` (repo root) | **The** entry point. `--sim` (default) / `--printer` / `--hardware`; `--ping`, `--no-gui` (headless + `--confirm`), `--no-dispenser`, `--config`. All it does is parse args and call `magnet_embed.entry`. |
 | `magnet_embed/entry.py` | Shared wiring: `build_links(mode, config)` → `(printer, dispenser)`; `ping()`; `run_headless()`; `launch_panel()`. One place that constructs links and runs the smoke test. |
 | `magnet_embed/main.py` / `main_printer.py` / `main_sim.py` | Back-compat `python -m …` wrappers — each parses its small CLI and calls `entry` with a fixed mode (`hardware` / `printer` / `sim`). The Uno stays optional in `hardware` mode: a dispenser that fails to connect degrades to printer-only for the session. |
@@ -140,11 +140,12 @@ back-compat wrappers that call `entry` with a fixed mode.
 | `magnet_embed/viz/preview.py` | `PreviewWindow` (Tk `Toplevel`, matplotlib `FigureCanvasTkAgg`) — layer slider, play/scrub the nozzle + pole tip along `plan_insert_moves`, envelope violations flagged, "Open 3D view". `python main.py --preview FILE`. |
 | `magnet_embed/sequences/geometry.py` | `compute_targets` / `plan_insert_moves` / `check_envelope` / `pole_point` — the one place the insert-motion targets are computed. `insert_magnet` executes them; the preview + plan dialog draw and envelope-check the same numbers. |
 | `magnet_embed/sequences/insert_magnet.py` | The `SAVE → PARK → DISPENSE → APPROACH → PRESS → SHEAR → LIFT → ASK → RESUME` state machine. Targets come from `geometry.compute_targets`. |
-| `magnet_embed/app.py` | `Controller` — headless UI↔worker mediator (threads, queues, prompt blocking); optional `log_dir` writes a per-run transcript. `load_gcode()` caches a parsed `toolpath` + raw `gcode_lines` (best-effort — a parse failure logs and leaves them empty rather than blocking the load); `progress_point`/`current_line_text` derive the live nozzle position + current G-code line from them. |
+| `magnet_embed/app.py` | `Controller` — headless UI↔worker mediator (threads, queues, prompt blocking); optional `log_dir` writes a per-run transcript. `load_gcode()` caches a parsed `toolpath` + raw `gcode_lines` (best-effort — a parse failure logs and leaves them empty rather than blocking the load); `progress_point`/`current_line_text` derive the live nozzle position + current G-code line from them. `start_z_calibration()`/`nudge_z()`/`save_z_offset()` drive the Z Calibrate dialog (idle-only). |
 | `magnet_embed/runlog.py` | `RunLog` — one `logs/<ts>-<name>.log` per streamed job, a timestamped line per event, plus a human-readable `=== SUMMARY ===` block appended on `close()` (duration, lines sent/total, sentinels seen, any errors, final position + temps). `summary_text` is also echoed to the panel log right after a run finishes. |
-| `magnet_embed/ui/panel.py` | Tkinter panel — thin view over `Controller`; jog/home/Level-Bed + raw G-code entry idle-only, "Plan magnet insert…" and "Settings…" dialogs, modal Success/Retry/Abort prompt, live log, an embedded live-print view (current layer + nozzle marker + current-step G-code text). |
+| `magnet_embed/ui/panel.py` | Tkinter panel — thin view over `Controller`; jog/home/Level-Bed/Z-Calibrate + raw G-code entry idle-only, "Plan magnet insert…", "Settings…", and "Z Calibrate…" dialogs, modal Success/Retry/Abort prompt, live log, an embedded live-print view (current layer + nozzle marker + current-step G-code text). |
 | `magnet_embed/ui/plan_dialog.py` | "Plan magnet insert" dialog + pure helpers — set pocket X/Y, seat Z, shear, target layer/Z; envelope-check; Preview; **Save `<stem>.magnet.gcode`** and load it. |
 | `magnet_embed/ui/settings_dialog.py` | "Settings" dialog — edit `printer.port`/`dispenser.port`/`magnet_tool_offset` from the panel, writes `config.local.yaml`. |
+| `magnet_embed/ui/zcal_dialog.py` | "Z Calibrate…" dialog — guided paper-test Z-offset workflow: home + travel to `zcal.{x,y,start_z}`, fine nudge buttons, Save applies the accumulated nudge to the trusted `config.zcal.probe_z_offset` (`Controller.save_z_offset`), never a value read back from the printer. **Untested on real hardware** — see Known Technical Debt. |
 | `dispenser_fw/` | Arduino Uno sketch for the magazine servo (Phase 2). |
 | `tests/` | `pytest` — runner, postprocess, insert state machine, printer sim, dispenser sim. |
 
@@ -307,13 +308,19 @@ hardware attached.
   not raise — the run continues printer-only. Default `False` keeps it strict.
 - Actions: `connect`, `load_gcode`, `jog`, `home`, `level_bed` (`G28`→`G29`→
   `M420 S1`→`M500`), `send_command` (raw G-code line), `extrude` (mm+feed,
-  negative = retract) — all no-ops while a run is active, and all now surface a
-  `PrinterError`/`AckTimeout`/`ResendRequested` as an `error` event instead of
-  raising — plus `start_run`, `pause`, `resume`, `cancel`, `answer_prompt`.
-  `level_bed` blocks the caller for the whole probe (can be a couple of
-  minutes) — same accepted trade-off as `home`, just longer; `wait_ok` already
-  tolerates it via Marlin's `busy:` keepalive (`DEFAULT_KEEPALIVE_INTERVAL 2`
-  in the stock firmware, well under `ack_timeout_s`).
+  negative = retract), `start_z_calibration` (`G28` then travel to
+  `zcal.{x,y,start_z}`), `nudge_z` (fine relative Z move at `zcal.feed`),
+  `save_z_offset` (applies the accumulated nudge to `config.zcal.probe_z_offset`,
+  sends `M851`+`M500`, persists via `save_local_override` and updates
+  `self.config` in place - same apply-immediately pattern as the Settings
+  dialog's magnet offset) — all no-ops while a run is active, and all now
+  surface a `PrinterError`/`AckTimeout`/`ResendRequested` as an `error` event
+  instead of raising — plus `start_run`, `pause`, `resume`, `cancel`,
+  `answer_prompt`. `level_bed` blocks the caller for the whole probe (can be a
+  couple of minutes) — same accepted trade-off as `home`, just longer;
+  `wait_ok` already tolerates it via Marlin's `busy:` keepalive
+  (`DEFAULT_KEEPALIVE_INTERVAL 2` in the stock firmware, well under
+  `ack_timeout_s`).
 - `set_temp(which, value)` and `refresh_state()` are the exception to "idle
   only": neither touches motion (`M104`/`M140`/`M105`/`M400`/`M114`), so both
   are allowed **during a normal print** (locked against the streaming loop —
@@ -332,13 +339,13 @@ hardware attached.
 
 ### `ui/panel.py` — `ControlPanel` + `run_gui(controller)`
 - Thin Tkinter view over a `Controller`. Connect, load G-code, run/pause/resume/cancel,
-  a run-progress bar, jog (0.1/1/10 mm) + home + "Level Bed…" (confirm dialog first
-  — it moves the toolhead over the whole bed) + raw G-code entry + extrude/retract
-  **idle only**, "Plan magnet insert…", read-only log, live position/temp line, an
-  embedded **live-print view**. Auto-refreshes state every `ui.idle_poll_s` while
-  connected + idle. `_show_prompt` opens a modal **Success / Retry / Abort** (or
-  **Ready / Abort**) dialog that calls `controller.answer_prompt`. Drains
-  `poll_events()` every 120 ms.
+  a run-progress bar, jog (0.1/1/10 mm) + home + "Level Bed…" + "Z Calibrate…"
+  (confirm dialogs first — both move the toolhead) + raw G-code entry +
+  extrude/retract **idle only**, "Plan magnet insert…", read-only log, live
+  position/temp line, an embedded **live-print view**. Auto-refreshes state
+  every `ui.idle_poll_s` while connected + idle. `_show_prompt` opens a modal
+  **Success / Retry / Abort** (or **Ready / Abort**) dialog that calls
+  `controller.answer_prompt`. Drains `poll_events()` every 120 ms.
 - **Live-print view** (`_sync_live_view`, C20) — a small `FigureCanvasTkAgg` embedded
   directly in the panel (not a separate window) showing the active layer's toolpath
   plus a marker at `controller.progress_point`, and a label under the canvas showing
@@ -350,6 +357,9 @@ hardware attached.
   Static (current layer, no marker) once a file loads; the marker tracks line progress
   once a run starts and freezes at the final position when it ends. No extra printer
   traffic — position comes from `Toolpath.progress_position`, not a polled `M114`.
+- **"Z Calibrate…"** (`ui/zcal_dialog.ZCalDialog`, C21) — opens next to "Level
+  Bed…"; idle-only. See its own module-table row and Known Technical Debt for
+  the config-is-the-trusted-offset design and the real-hardware caveat.
 - Temperature panel is *not* idle-gated (`set_temp` works mid-print, see `app.py`):
   each of the nozzle/bed rows shows the allowed range from
   `config['temps'][{nozzle,bed}_{min,max}_c]` and a live `now: A/B°C` label
@@ -385,6 +395,14 @@ hardware attached.
   at `seat_z`). The offset shrinks the reachable area and can make a low pocket
   unreachable (`seat_z − offset.z < 0`) — the host checks every target in-envelope and
   **aborts the sequence with the print still paused** if not.
+- **Z-probe offset is trusted from config, not read back from the printer.**
+  `config.zcal.probe_z_offset` — same pattern as `magnet_tool_offset`: measure
+  the real value once (send a bare `M851` from a terminal), put it in
+  `config.local.yaml`, and every "Z Calibrate…" save adjusts *that* number by
+  the accumulated nudge, then pushes the result with `M851 Z<new>` + `M500`.
+  Chosen over parsing the firmware's `M851` report because that report's exact
+  text format for this printer's firmware fork was never verified — see Known
+  Technical Debt.
 - **Press and shear are printer moves, not servo moves.** The Arduino servo only
   *dispenses* one magnet to the holding pole. The **printer** presses (Z down to seat
   depth) and shears (short **lateral** move so the pole slides off the seated magnet).
@@ -479,6 +497,9 @@ and passing a different launch flag — there is no code transfer.
 - [ ] Magnet grade decided; magazine loaded consistently (polarity is set by the holding pole)
 - [ ] Stock firmware backup on hand
 - [ ] Windows sleep disabled for the session
+- [ ] Before the first real "Z Calibrate…" run: read the printer's actual `M851`
+      value from a terminal and set `zcal.probe_z_offset` in `config.local.yaml`
+      to match (see Known Technical Debt — the app never reads it back itself)
 
 ### Hardware smoke test
 
@@ -546,6 +567,20 @@ parks, magnet dispensed, controlled press + lateral shear run, print resumes and
   `G28` unless something re-sends `M420 S1` right after it — either add that
   line to the slicer's start G-code, or (not built) have `GcodeRunner`
   auto-resend `M420 S1` after any `G28` it streams.
+- **The "Z Calibrate…" workflow (C21, `ui/zcal_dialog.py` / `Controller.
+  start_z_calibration`/`nudge_z`/`save_z_offset`) is entirely unverified on
+  real hardware** — built and tested only against `SimPrinter`. Two specific
+  unknowns: (1) whether the stock V3 SE firmware fork accepts `M851 Z<value>`
+  + `M500` the way stock Marlin does — not confirmed; (2) `config.zcal.
+  probe_z_offset` is trusted from config, never read back from the printer
+  (a deliberate choice — the real `M851` report text format for this firmware
+  fork was not available to verify a parser against, and trusting an
+  unverified parse of a bed-proximity value was judged riskier than trusting
+  a config value the operator measured once). Before the first real
+  calibration: read the printer's actual `M851` value from a terminal and set
+  `zcal.probe_z_offset` in `config.local.yaml` to match, start with a large
+  step (0.5 mm), and watch the machine closely — see the Pre-hardware
+  checklist item added for this.
 
 No rule violations recorded. Add any here (file + line) as they appear; do not omit.
 

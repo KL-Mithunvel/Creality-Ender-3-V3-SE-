@@ -34,7 +34,8 @@ def test_local_override_is_merged(tmp_path):
         "prime: {mm: 2, feed: 300}\n"
         "press: {feed: 60, dwell_ms: 500}\n"
         "shear: {distance: 5, feed: 1200}\n"
-        "gcode: {sentinel_token: ';MAGNET_INSERT'}\n",
+        "gcode: {sentinel_token: ';MAGNET_INSERT'}\n"
+        "zcal: {x: 110, y: 110, start_z: 5, step_mm: 0.05, feed: 100, probe_z_offset: 0}\n",
         encoding="utf-8",
     )
     (tmp_path / "config.local.yaml").write_text(
@@ -88,6 +89,23 @@ def test_validate_rejects_bad_live_view_poll():
     with pytest.raises(ValueError):
         _validate(cfg)
     cfg["ui"]["live_view_poll_s"] = "fast"
+    with pytest.raises(ValueError):
+        _validate(cfg)
+
+
+def test_zcal_defaults_present():
+    cfg = load_config()
+    assert cfg["zcal"]["probe_z_offset"] == 0.0
+    assert cfg["zcal"]["step_mm"] > 0
+
+
+def test_validate_rejects_non_numeric_zcal_field():
+    import pytest
+
+    from magnet_embed.config import _validate
+
+    cfg = load_config()
+    cfg["zcal"]["feed"] = "fast"
     with pytest.raises(ValueError):
         _validate(cfg)
 

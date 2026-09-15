@@ -558,3 +558,49 @@ smoke test.
   (Running-the-system status line, module table rows for `toolpath.py` /
   `toolpath_fig.py` / `app.py`, `ui/panel.py` Key Modules section).
 
+## 2026-09-15 (cont.) — Audited temp polling; added a current-step readout + Z-offset calibration (C21); committed in phases
+
+- Owner asked three things in one message: (1) confirm live bed/temp polling
+  and mid-print temp changes are actually wired up, (2) add a Z-calibration
+  button, (3) add a plot showing the G-code "along with what the current step
+  looks like" — and to commit after each phase.
+- (1) audited, no code needed: already true (see the C20 entry above; also
+  independently confirmed by re-reading `panel.py`'s poll loop and
+  `test_refresh_state_allowed_while_running` / `test_set_temp_allowed_while_running`).
+- (3) was mostly already the C20 live view from earlier this session; added a
+  small follow-on - a "current step" label under the canvas showing the raw
+  text of the G-code line the runner is on (`Controller.current_line_text`,
+  backed by a new `gcode_lines` cache in `load_gcode()`).
+- (2) new: **Z Calibrate…** guided paper-test dialog (`ui/zcal_dialog.py`) +
+  `Controller.start_z_calibration`/`nudge_z`/`save_z_offset` + a new `zcal`
+  config section. Key design call: rather than reading the printer's current
+  `M851` value back and risk trusting an unverified report-text parse (a real
+  bed-crash risk if wrong), `config.zcal.probe_z_offset` is the app's trusted
+  baseline - same pattern already proven for `magnet_tool_offset` - and Save
+  adjusts *that* by the nudged delta, then pushes the result with `M851`+`M500`.
+  Flagged prominently (dialog copy, docstrings, `.CLAUDE/CLAUDE.md` Known
+  Technical Debt, a new Pre-hardware-checklist line) that this entire workflow
+  is unverified on the real V3 SE.
+- Caught and fixed a real test-hygiene bug while building this: an early draft
+  test called `Controller.save_z_offset` without mocking `save_local_override`,
+  which would have written a **real** `magnet_embed/config.local.yaml` into the
+  repo on every test run (same unguarded-write pattern the Settings dialog
+  already has, which is why `test_settings_dialog.py` only tests its pure
+  `build_updates` helper and never calls `_save()`). Rewrote the test to mock
+  `app_mod.save_local_override` instead. Also caught the same problem in my
+  own manual smoke-test script (it called the real method and *did* write a
+  stray `config.local.yaml` with a fake `-0.1` offset) - deleted it before
+  finishing.
+- Tests: 209 -> 218. Manual: a driven-widget smoke test (`ZCalDialog` +
+  `ControlPanel` against a withdrawn `Tk` root, sim printer) walked
+  start -> nudge x2 -> save -> close end to end, including confirming Close
+  lifts Z clear of the bed afterward.
+- Docs synced: `TODO.md`, `project/BUILD_PLAN.md` (new Phase 1.8 / C21
+  section + a note confirming (1) needed no code), `README.md`,
+  `.CLAUDE/CLAUDE.md` (status line, module table rows for `config.yaml` /
+  `app.py` / `ui/panel.py` / new `ui/zcal_dialog.py`, Controller
+  actions/properties, Key Conventions, Known Technical Debt, Pre-hardware
+  checklist).
+- Committed in phases per the owner's request: (1) the stale-TODO fix, (2) the
+  C20 live view + current-step readout, (3) the C21 Z-calibration feature -
+  see the commit log for exact hashes.

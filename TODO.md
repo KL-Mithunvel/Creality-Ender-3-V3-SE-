@@ -8,11 +8,20 @@ criteria, risks). Architecture and rules: `.CLAUDE/CLAUDE.md`. Keep all three in
 
 - [ ] Hardware: build the clip-on applicator (magazine + escapement + holding pole + mount);
       wire the Arduino Uno + servo; measure `magnet_tool_offset`; run the manual smoke test
+- [ ] Hardware: bench-test the "Z Calibrate…" workflow (C21) on the real printer before
+      trusting it on a real print — verify homing/travel, nudge direction and feel, and
+      that `M851`/`M500` actually take effect (measure the printer's real starting M851 Z
+      value once and set `zcal.probe_z_offset` in `config.local.yaml` before the first run)
 - [ ] Patent: fill the `[INVENTORS TO COMPLETE]` sections of `docs/INVENTION_DISCLOSURE_DRAFT.md`,
       run a prior-art search with the K&K agent, confirm college IP policy
 
 ## Done
 
+- [x] **Phase 1.8 — C21** (`project/BUILD_PLAN.md`) — "Z Calibrate…" guided paper-test
+      Z-offset dialog (`ui/zcal_dialog.py`); config (`zcal.*`) is the trusted offset,
+      not a printer readback; `M851`+`M500` on save. **Untested on real hardware —
+      bench-test deliberately before trusting it.** Also confirmed (no code needed)
+      that mid-print temp polling + temp changes were already done. 218 tests.
 - [x] **Phase 1.7 — C20** (`project/BUILD_PLAN.md`) — embedded live-print view in the
       main panel: current layer + a nozzle-position marker + a current-step G-code
       text readout, driven from G-code line progress against the parsed toolpath

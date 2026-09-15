@@ -68,6 +68,22 @@ ui:
   idle_poll_s: 2.0         # panel auto-refreshes position + temps this often while idle; 0 disables
   live_view_poll_s: 1.0    # panel redraws the embedded live-print view this often during a run; 0 disables
 
+# Z-offset ("paper test") calibration - the "Z Calibrate..." panel button.
+# probe_z_offset is the value the APP trusts as the printer's current M851 Z
+# offset (config is the source of truth here, same pattern as magnet_tool_offset
+# below - NOT read back from the firmware, since the exact M851 report format
+# for this printer's firmware fork is unverified). Check your printer's real
+# value once (send a bare `M851` from a terminal) and set it here before the
+# first calibration, or the saved offset will drift from what the firmware
+# actually has stored.
+zcal:
+  x: 110.0                 # bed-center XY the nozzle travels to for the paper test
+  y: 110.0
+  start_z: 5.0              # safe Z above the bed before the fine nudge-down starts
+  step_mm: 0.05              # default nudge step shown in the dialog
+  feed: 100                 # mm/min for the fine Z nudge moves - deliberately slow
+  probe_z_offset: 0.0       # MEASURE THIS - the printer's real M851 Z offset
+
 gcode:
   sentinel_token: ";MAGNET_INSERT"
   require_sentinel: false   # if true, a run that reaches EOF with no sentinel errors

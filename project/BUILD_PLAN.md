@@ -9,7 +9,7 @@ chunks. Each chunk: build → `pytest` green → stage → commit.
 |--|--|
 | Owner | kl mithunvel |
 | Created | 2026-09-09 |
-| Status | **C1–C8 + Phase 1.6 (C13–C19) + C20 done — 209 tests.** One root `python main.py` (mode by flag), bring-your-own-G-code, toolpath + insert-motion preview, "Plan magnet insert…" dialog, panel polish, an embedded live-print view (current layer + nozzle marker + current-step G-code text) during a run. Magnet-flow hardware smoke test still pending the applicator build. |
+| Status | **C1–C8 + Phase 1.6 (C13–C19) + C20 + C21 done — 218 tests.** One root `python main.py` (mode by flag), bring-your-own-G-code, toolpath + insert-motion preview, "Plan magnet insert…" dialog, panel polish, an embedded live-print view (current layer + nozzle marker + current-step G-code text) during a run, and a guided Z-offset calibration dialog. Magnet-flow hardware smoke test still pending the applicator build; the Z-calibration workflow is itself untested on real hardware — see Known Technical Debt. |
 | Overall plan | `project/PROJECT_PLAN.md` |
 | Architecture / rules | `.CLAUDE/CLAUDE.md` |
 
@@ -741,6 +741,76 @@ the raw text of the G-code line the runner is currently on
 (`Controller.current_line_text`, from a `gcode_lines` cache also filled in
 `load_gcode()`) — "what the current step looks like" as text alongside the
 plot, not just a dot on it.
+
+---
+
+## Phase 1.8 — Consistent temp polling (verified already done) + Z-offset calibration
+
+**Why.** Owner asked (1) whether live bed/nozzle temp polling and mid-print
+temp changes were already wired up, and (2) for a Z-calibration button.
+
+**(1) is already done, no code needed** — confirmed by re-reading the shipped
+behaviour: `ControlPanel._poll()` calls `Controller.refresh_state()` on the
+`ui.idle_poll_s` timer with **no** `not running` guard, and its docstring
+("safe during a run too") is backed by `test_refresh_state_allowed_while_running`.
+`Controller.set_temp()` is likewise allowed mid-print (locked against the
+streaming loop, blocked only while the magnet-insert sequence owns the
+heaters) - `test_set_temp_allowed_while_running`. Both shipped in the
+2026-09-15 GUI-polish session, before this one.
+
+---
+
+### C21 — Z-offset calibration ("Z Calibrate…")  ✅
+
+**Goal.** A guided paper-test workflow from the panel to (re)tune the CR-Touch
+probe's Z offset, since the V3 SE's own one-touch Z sensor is only reachable
+from the stock touchscreen (established in the 2026-09-15 first-layer
+root-cause session — not host-accessible).
+
+**Design decision — config as the trusted offset, not a printer readback.**
+The obvious approach — read the current `M851` value off the printer, nudge,
+write it back — depends on parsing the firmware's `M851` report text, which
+has **not been verified** for this printer's firmware fork. Getting that parse
+wrong and silently trusting a garbage value is a real bed-crash risk. Instead
+`config.zcal.probe_z_offset` is the single source of truth the app trusts —
+exactly the pattern already proven for `magnet_tool_offset` (Settings dialog):
+measure it once for real (`M851` from a terminal), put it in config, and every
+future calibration adjusts *that* value by the nudged delta rather than
+reading anything back from the printer.
+
+**Done:**
+- `config.yaml` / `config.py` — new `zcal` section (`x`, `y`, `start_z`,
+  `step_mm`, `feed`, `probe_z_offset`), required + numeric-validated like
+  every other section.
+- `app.Controller` — `start_z_calibration()` (`G28` then travel to
+  `zcal.{x,y,start_z}`), `nudge_z(delta)` (slow relative Z move at
+  `zcal.feed`), `save_z_offset(cumulative_delta)` (`new = zcal.probe_z_offset
+  + cumulative_delta`; sends `M851 Z<new>` + `M500`; persists via
+  `config.save_local_override` and updates `self.config` in place — same
+  apply-immediately behaviour as the Settings dialog's offset field). All
+  three idle-only, matching `home()`/`level_bed()`.
+- `ui/zcal_dialog.py` — `ZCalDialog`: a safety-first guided flow (explicit
+  confirm before homing/moving, explicit confirm before Save, a fine step
+  selector defaulting to 0.05 mm, a live "would save X.XXX mm" preview,
+  Close always lifts Z clear via the existing `jog()` — whether or not the
+  offset was saved, so the nozzle never sits near the plate). Opened from a
+  new "Z Calibrate…" button next to "Level Bed…" in the panel's jog frame,
+  idle-only like the rest of that row.
+- Tests: `test_config.py` (+2: default + validation), `test_app.py` (+7:
+  homing/travel command shape, idle-only guards on all three actions,
+  `M851`/`M500` command shape, config persistence via a mocked
+  `save_local_override` — deliberately **not** exercised against the real
+  `config.local.yaml`, same reasoning `test_settings_dialog.py` already
+  applies). **218 tests.**
+- Manual: a driven-widget smoke test (`ZCalDialog` + `ControlPanel` against a
+  withdrawn `Tk` root, sim printer) walked start → nudge ×2 → save → close,
+  confirmed the cumulative math, the `M851`/`M500` commands, the config
+  update, and that closing the dialog lifts Z clear of the bed.
+
+**Known gap (flagged, not fixed here):** this entire workflow is unverified on
+the real V3 SE — see `.CLAUDE/CLAUDE.md` → Known Technical Debt. Bench-test it
+deliberately (start with large steps, watch the machine, power switch within
+reach) before trusting it for a real print.
 
 ---
 

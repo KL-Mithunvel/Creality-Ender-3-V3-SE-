@@ -414,6 +414,95 @@ def test_current_line_text_tracks_progress(config):
     _pump_until(ctl, "done", answer="success")
 
 
+# --- C21: Z-offset calibration ---------------------------------------
+
+def test_start_z_calibration_homes_and_travels(config):
+    ctl = _ctl(config)
+    ctl.start_z_calibration()
+    zc = config["zcal"]
+    assert ctl.printer.sent[-2] == "G28"
+    assert ctl.printer.sent[-1] == (
+        f"G1 X{zc['x']:g} Y{zc['y']:g} Z{zc['start_z']:g} F{config['travel']['feed']:g}"
+    )
+
+
+def test_start_z_calibration_ignored_while_running(config):
+    ctl = _ctl(config, delay=0.03)
+    ctl.load_gcode(SAMPLE)
+    ctl.start_run()
+    assert _wait(lambda: ctl.running)
+    before = list(ctl.printer.sent)
+    ctl.start_z_calibration()
+    assert ctl.printer.sent == before
+    _pump_until(ctl, "done", answer="success")
+
+
+def test_nudge_z_sends_relative_move(config):
+    ctl = _ctl(config)
+    ctl.nudge_z(-0.05)
+    zc = config["zcal"]
+    assert ctl.printer.sent[-3:] == ["G91", f"G1 Z-0.05 F{zc['feed']:g}", "G90"]
+
+
+def test_nudge_z_ignored_while_running(config):
+    ctl = _ctl(config, delay=0.03)
+    ctl.load_gcode(SAMPLE)
+    ctl.start_run()
+    assert _wait(lambda: ctl.running)
+    before = list(ctl.printer.sent)
+    ctl.nudge_z(-0.05)
+    assert ctl.printer.sent == before
+    _pump_until(ctl, "done", answer="success")
+
+
+def test_save_z_offset_writes_m851_and_persists(config, monkeypatch):
+    # save_local_override writes to the real repo's config.local.yaml with no
+    # path override (same pattern as the Settings dialog) - mock it here so
+    # the test suite never touches that file, and assert on what would be
+    # persisted instead.
+    import magnet_embed.app as app_mod
+
+    calls: list[dict] = []
+    monkeypatch.setattr(app_mod, "save_local_override", lambda updates: calls.append(updates))
+
+    ctl = _ctl(config)
+    starting = ctl.config["zcal"]["probe_z_offset"]
+    ctl.save_z_offset(-0.3)
+    new_offset = round(starting - 0.3, 3)
+    assert f"M851 Z{new_offset:g}" in ctl.printer.sent
+    assert "M500" in ctl.printer.sent
+    assert ctl.config["zcal"]["probe_z_offset"] == new_offset
+    assert calls == [{"zcal": {"probe_z_offset": new_offset}}]
+
+
+def test_save_z_offset_ignored_while_running(config):
+    ctl = _ctl(config, delay=0.03)
+    ctl.load_gcode(SAMPLE)
+    ctl.start_run()
+    assert _wait(lambda: ctl.running)
+    before = list(ctl.printer.sent)
+    ctl.save_z_offset(-0.1)
+    assert ctl.printer.sent == before
+    _pump_until(ctl, "done", answer="success")
+
+
+def test_z_calibration_surfaces_printer_error(config):
+    ctl = _ctl(config)
+    ctl.printer.command = _boom
+    ctl.start_z_calibration()
+    assert any(k == "error" for k, _ in ctl.poll_events())
+
+    ctl2 = _ctl(config)
+    ctl2.printer.command = _boom
+    ctl2.nudge_z(-0.05)
+    assert any(k == "error" for k, _ in ctl2.poll_events())
+
+    ctl3 = _ctl(config)
+    ctl3.printer.command = _boom
+    ctl3.save_z_offset(-0.05)
+    assert any(k == "error" for k, _ in ctl3.poll_events())
+
+
 def test_progress_zero_then_advances_then_final(config):
     ctl = _ctl(config, delay=0.02)
     assert ctl.progress == (0, 0)

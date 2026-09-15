@@ -46,6 +46,12 @@ _REQUIRED_KEYS: tuple[tuple[str, str], ...] = (
     ("shear", "distance"),
     ("shear", "feed"),
     ("gcode", "sentinel_token"),
+    ("zcal", "x"),
+    ("zcal", "y"),
+    ("zcal", "start_z"),
+    ("zcal", "step_mm"),
+    ("zcal", "feed"),
+    ("zcal", "probe_z_offset"),
 )
 
 
@@ -73,6 +79,8 @@ _NUMERIC_KEYS: tuple[tuple[str, str], ...] = (
     ("retract", "mm"), ("retract", "feed"), ("prime", "mm"), ("prime", "feed"),
     ("press", "feed"), ("press", "dwell_ms"),
     ("shear", "distance"), ("shear", "feed"),
+    ("zcal", "x"), ("zcal", "y"), ("zcal", "start_z"),
+    ("zcal", "step_mm"), ("zcal", "feed"), ("zcal", "probe_z_offset"),
 )
 
 

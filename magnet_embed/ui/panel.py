@@ -109,6 +109,8 @@ class ControlPanel(ttk.Frame):
         ttk.Button(jog, text="Home", command=self.c.home).grid(row=1, column=2, padx=8)
         self.btn_level = ttk.Button(jog, text="Level Bed…", command=self._level_bed)
         self.btn_level.grid(row=1, column=3, columnspan=2, padx=8, sticky="w")
+        self.btn_zcal = ttk.Button(jog, text="Z Calibrate…", command=self._zcal)
+        self.btn_zcal.grid(row=2, column=3, columnspan=2, padx=8, pady=(4, 0), sticky="w")
         row += 1
 
         temp = ttk.LabelFrame(self, text="Temperature  (works during a print too)", padding=6)
@@ -195,6 +197,10 @@ class ControlPanel(ttk.Frame):
     def _open_settings(self) -> None:
         from .settings_dialog import SettingsDialog
         SettingsDialog(self.winfo_toplevel(), self.c)
+
+    def _zcal(self) -> None:
+        from .zcal_dialog import ZCalDialog
+        ZCalDialog(self.winfo_toplevel(), self.c)
 
     def _plan_insert(self) -> None:
         if self.c.gcode_path is None or self.c.running:
@@ -318,6 +324,7 @@ class ControlPanel(ttk.Frame):
         self.btn_extrude.configure(state=idle_state)
         self.btn_retract.configure(state=idle_state)
         self.btn_level.configure(state=idle_state)
+        self.btn_zcal.configure(state=idle_state)
         self.btn_plan.configure(
             state=("disabled" if running or self.c.gcode_path is None else "normal")
         )
