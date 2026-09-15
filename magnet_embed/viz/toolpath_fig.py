@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import math
 
+import numpy as np
+
 from ..gcode.toolpath import Toolpath
 from ..sequences.geometry import InsertMove, plan_insert_moves, pole_point
 from ..state import MagnetInsert, PrinterState
@@ -146,24 +148,89 @@ def update_live_marker(artists: dict, point: Point) -> None:
     artists["marker"].set_data([point[0]], [point[1]])
 
 
-def draw_live_3d(ax, tp: Toolpath) -> dict:
-    """Isometric 3D toolpath (the whole part, not one layer) plus an empty
-    nozzle-position marker, for the panel's live-print view "3D" toggle.
-    Same cheap-marker-update pattern as `draw_live_layer`/`update_live_marker`.
+def progressive_path_3d(
+    tp: Toolpath, current_line: int
+) -> tuple[list[float], list[float], list[float]]:
+    """X/Y/Z arrays of every *extruding* segment at or before `current_line` -
+    "what the nozzle has actually printed so far" - with a `nan` break
+    inserted wherever two consecutive extruding segments don't connect (a
+    travel move in between), so a single `Line3D` can be reused every sync
+    tick instead of a Line3D artist per segment (the old approach `draw_path_3d`
+    still uses for a static one-shot snapshot). Segments are already
+    line-ascending (single top-to-bottom parse), so this is a straight
+    prefix-scan, no bisect needed - `current_line` shrinks the work as the
+    print starts, not as it finishes.
+    """
+    xs: list[float] = []
+    ys: list[float] = []
+    zs: list[float] = []
+    prev_end: Point | None = None
+    for s in tp.segments:
+        if s.line_no > current_line:
+            break
+        if not s.extruding:
+            prev_end = None
+            continue
+        if prev_end != s.p0:
+            if xs:
+                xs.append(math.nan)
+                ys.append(math.nan)
+                zs.append(math.nan)
+            xs.append(s.p0[0])
+            ys.append(s.p0[1])
+            zs.append(s.p0[2])
+        xs.append(s.p1[0])
+        ys.append(s.p1[1])
+        zs.append(s.p1[2])
+        prev_end = s.p1
+    return xs, ys, zs
+
+
+def draw_live_3d(ax, tp: Toolpath, bed_xy: tuple[float, float]) -> dict:
+    """Isometric 3D view for the panel's live-print view: the full bed plate
+    (static outline, `bed_xy` = `machine.x_max`/`y_max`) plus an empty path
+    line - filled in progressively by `update_live_3d`, not drawn upfront
+    like `draw_path_3d` - and a position marker. `set_box_aspect` gives true
+    equal mm-per-axis scaling (matplotlib 3D defaults to stretching each axis
+    to fill the view, which visually distorts a part that's wide and flat).
     """
     ax.clear()
-    draw_path_3d(ax, tp)
+    bx, by = bed_xy
+    xr = max(tp.bbox_max[0], bx) - min(tp.bbox_min[0], 0.0)
+    yr = max(tp.bbox_max[1], by) - min(tp.bbox_min[1], 0.0)
+    zr = max(tp.bbox_max[2] - min(tp.bbox_min[2], 0.0), 1.0)
+    ax.set_box_aspect((xr, yr, zr))
+    bed_x = [0.0, bx, bx, 0.0, 0.0]
+    bed_y = [0.0, 0.0, by, by, 0.0]
+    bed_z = [0.0, 0.0, 0.0, 0.0, 0.0]
+    ax.plot(bed_x, bed_y, bed_z, color="#9aa0a6", lw=1.0, ls="--", zorder=1)
     ax.view_init(elev=28, azim=-60)  # isometric-ish, matches most slicer previews
     ax.set_xlabel("X")
     ax.set_ylabel("Y")
     ax.set_zlabel("Z")
+    (path,) = ax.plot([], [], [], color=_EXTRUDE, lw=1.2, zorder=4)
     (marker,) = ax.plot([], [], [], "o", ms=6, color="#c53b3b", zorder=6)
-    return {"marker": marker}
+    return {"path": path, "marker": marker}
 
 
-def update_live_marker_3d(artists: dict, point: Point) -> None:
-    artists["marker"].set_data([point[0]], [point[1]])
-    artists["marker"].set_3d_properties([point[2]])
+def update_live_3d(artists: dict, tp: Toolpath, current_line: int) -> None:
+    """Grow the printed-so-far path to `current_line` and move the marker to
+    match - the 3D counterpart of `update_live_marker` (which only ever needs
+    to move a dot, since `draw_live_layer` already draws the whole layer).
+
+    `Line3D.set_3d_properties` re-reads its *original* x/y data via
+    `get_xdata()` (not a recached copy), so passing plain lists through
+    `set_data` leaves `_verts3d` holding plain lists too - matplotlib's own
+    3D draw path then does `self._verts3d[0].shape` and blows up with
+    `AttributeError: 'list' object has no attribute 'shape'`. Always hand it
+    real arrays.
+    """
+    xs, ys, zs = progressive_path_3d(tp, current_line)
+    artists["path"].set_data(np.asarray(xs, dtype=float), np.asarray(ys, dtype=float))
+    artists["path"].set_3d_properties(np.asarray(zs, dtype=float))
+    point = tp.progress_position(current_line)
+    artists["marker"].set_data(np.asarray([point[0]]), np.asarray([point[1]]))
+    artists["marker"].set_3d_properties(np.asarray([point[2]]))
 
 
 def _project(pt: Point, plane: str) -> tuple[float, float]:

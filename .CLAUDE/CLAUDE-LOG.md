@@ -666,3 +666,55 @@ smoke test.
   section, including the screenshot-mishap process note), `README.md`,
   `.CLAUDE/CLAUDE.md` (status line, module table rows, `app.py`/`ui/panel.py`/
   `ui/plan_dialog.py` Key Modules sections, Known Technical Debt).
+
+## 2026-09-16 (cont.) — 2D/3D side by side, bed-aware equal-scale 3D, progressive path reveal (C23)
+
+- Owner asked for four more things after driving C22 themselves: (1) show the
+  2D and 3D live views at the same time instead of toggling; (2) fix the 3D
+  view's axis scaling to be proportionally correct; (3) draw the full bed
+  plate in 3D for scale reference; (4) the 3D path (the "yellow lines")
+  should only appear as the nozzle actually passes through that point, not
+  show the whole part immediately; and to compact the live-view plots plus
+  the send-G-code/log section so more fits on one screen.
+- Implemented all four as **Phase 1.10 — C23**: `viz/toolpath_fig
+  .progressive_path_3d(tp, current_line)` - a pure prefix-scan building a
+  single growing `Line3D`'s worth of X/Y/Z data (with `nan` breaks between
+  non-contiguous extrude runs) instead of one Line3D artist per segment;
+  `draw_live_3d` now also draws a static bed-plate outline from
+  `machine.x_max`/`y_max` and calls `ax.set_box_aspect((xr, yr, zr))` from
+  the combined bed+part extent for true equal-mm-per-axis scaling;
+  `ui/panel.py`'s live view is no longer a 2D/3D toggle - `live2d_*` and
+  `live3d_*` are two canvases packed side by side, both updated every sync.
+- Caught a real bug while wiring the progressive path: `Line3D
+  .set_3d_properties` reads its data back via `get_xdata()`, which returns
+  the *original* object passed to `set_data` (not a recached copy) - so
+  passing plain Python lists (my `progressive_path_3d` return type) left
+  `_verts3d` holding plain lists, and matplotlib's own 3D draw path does
+  `self._verts3d[0].shape` and raises `AttributeError: 'list' object has no
+  attribute 'shape'`. A 1-point marker update never hit this (that's why
+  C22's marker-only 3D code worked), only a real multi-point line did.
+  Fixed by converting to `numpy` arrays right before handing them to the
+  artist in `update_live_3d`; added `numpy` to `requirements.txt` explicitly
+  (it was already a transitive matplotlib dependency, now imported
+  directly). Caught via the introspection-driving script, not by eyeballing
+  the GUI - the exception surfaced as a Tkinter callback traceback the first
+  time the panel actually tried to redraw after a run started.
+- Compacted the panel per the "fold it... same screen" ask: both live-view
+  plots shrunk from one 4.6×3.0 figure to two 2.1×1.65 figures side by side,
+  log box shortened 14 rows -> 8. Measured content height via the same
+  introspection script: 1185 px -> 942 px. Still taller than the 864 px
+  screen driven against, so the C22 scrollable canvas stays the fallback -
+  didn't shrink the plots further since that started trading away
+  readability for not much more height regained.
+- Tests: 223 -> 224 (`draw_live_3d`/`update_live_3d` updated for the new
+  signature and array-based artists, `progressive_path_3d` new: 3 cases).
+  Re-ran the introspection-driving script end to end after the fix: no
+  exception, 3D path length grows monotonically across a simulated run
+  (`[0, 0, 0] ... [12, 12, 12]` for the 12-move sample file), final marker on
+  the last move's endpoint, `ax.get_box_aspect()` reflects real proportions
+  (`[1.35, 1.35, 0.05]` - square bed, thin sample part - not stretched to
+  `[1, 1, 1]`).
+- Docs synced: `TODO.md`, `project/BUILD_PLAN.md` (new Phase 1.10 / C23
+  section), `README.md`, `.CLAUDE/CLAUDE.md` (status line, module table rows,
+  `ui/panel.py` Key Modules section rewritten for the side-by-side design),
+  `requirements.txt` (`numpy`).

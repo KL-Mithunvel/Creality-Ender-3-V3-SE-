@@ -9,7 +9,7 @@ chunks. Each chunk: build → `pytest` green → stage → commit.
 |--|--|
 | Owner | kl mithunvel |
 | Created | 2026-09-09 |
-| Status | **C1–C8 + Phase 1.6 (C13–C19) + C20 + C21 + C22 done — 223 tests.** One root `python main.py` (mode by flag), bring-your-own-G-code, toolpath + insert-motion preview, "Plan magnet insert…" dialog (now with an embedded live preview of the insert motion), panel polish, a scrollable panel with a mode/port indicator, an embedded live-print view (2D layer + isometric 3D toggle, nozzle marker, current-step G-code text) during a run, and a guided Z-offset calibration dialog. Magnet-flow hardware smoke test still pending the applicator build; the Z-calibration workflow is itself untested on real hardware — see Known Technical Debt. |
+| Status | **C1–C8 + Phase 1.6 (C13–C19) + C20 + C21 + C22 + C23 done — 224 tests.** One root `python main.py` (mode by flag), bring-your-own-G-code, toolpath + insert-motion preview, "Plan magnet insert…" dialog (now with an embedded live preview of the insert motion), panel polish, a scrollable panel with a mode/port indicator, an embedded live-print view (2D current-layer + isometric 3D shown side by side — bed plate, equal-scale axes, a path that grows as the nozzle passes through it — plus a nozzle marker and current-step G-code text) during a run, and a guided Z-offset calibration dialog. Magnet-flow hardware smoke test still pending the applicator build; the Z-calibration workflow is itself untested on real hardware — see Known Technical Debt. |
 | Overall plan | `project/PROJECT_PLAN.md` |
 | Architecture / rules | `.CLAUDE/CLAUDE.md` |
 
@@ -894,6 +894,65 @@ nothing in `Controller` ever un-sets `_connected`, so a real cable pull
 wouldn't be reflected there (it would still surface as an `error` event on the
 next command). No printer is available to validate real failure behaviour
 against right now; revisit once the applicator/bench work resumes.
+
+---
+
+### C23 — Side-by-side 2D/3D, equal-scale bed-aware 3D, progressive path reveal  ✅
+
+**Why.** Owner drove the C22 GUI directly and asked for more: the 2D/3D toggle
+should be side-by-side instead of either/or; the 3D view needed correct
+equal-mm-per-axis scaling (matplotlib 3D defaults to stretching each axis to
+fill the plot, which visually lies about proportions) and the full bed plate
+for scale reference; the 3D path should reveal progressively as the nozzle
+actually passes through it, not show the whole part upfront; and everything
+(both plots, the send-G-code box, the log) needed to be more compact - "fold
+its size... keep it side to side... isible in same screen."
+
+**Done:**
+- `viz/toolpath_fig.py` — `progressive_path_3d(tp, current_line)`: a pure
+  prefix-scan over `tp.segments` returning X/Y/Z arrays of every *extruding*
+  segment at or before `current_line`, with a `nan` break inserted wherever
+  two consecutive extruding segments don't connect (a travel move between
+  them) — lets one `Line3D` represent the whole printed-so-far path via a
+  single `set_data`/`set_3d_properties` call instead of one artist per
+  segment. `draw_live_3d(ax, tp, bed_xy)` now draws a static bed-plate
+  outline (`machine.x_max`/`y_max`) and calls `ax.set_box_aspect((xr, yr,
+  zr))` from the combined bed+part extent — true equal mm-per-axis scaling,
+  so a wide flat part actually *looks* wide and flat instead of an
+  auto-stretched cube. `update_live_3d(artists, tp, current_line)` rebuilds
+  the path from `progressive_path_3d` and moves the marker together.
+- **Bug found and fixed while building this:** `Line3D.set_3d_properties`
+  reads its data back via `get_xdata()`, which by default returns the
+  *original* object handed to `set_data` (not a recached numpy copy) — so
+  passing plain Python lists left `_verts3d` holding plain lists, and
+  matplotlib's own 3D draw path does `self._verts3d[0].shape` and raises
+  `AttributeError: 'list' object has no attribute 'shape'`. Only bit when the
+  line had ≥2 points (a 1-point marker update didn't trigger it, which is why
+  C22's marker-only 3D code never hit this). Fixed by always handing
+  `update_live_3d` real `numpy` arrays. `numpy` added to `requirements.txt`
+  explicitly (was already a transitive matplotlib dependency, now imported
+  directly).
+- `ui/panel.py` — the live-print view is no longer a toggle; `live2d_*` and
+  `live3d_*` are two canvases packed side by side, both always visible and
+  always updated together in `_sync_live_view`. Both plots shrunk (figsize
+  2.1×1.65 each, was one 4.6×3.0 plot) and the log box shortened (14 rows →
+  8) to claw back the vertical space the side-by-side layout and the C22
+  additions (mode label, calibration captions) had used — measured via the
+  same introspection-driving approach as C22: panel content height dropped
+  from **1185 px → 942 px**. Still taller than the 864 px screen driven
+  against, so the C22 scrollable canvas remains the guaranteed fallback —
+  shrinking the plots further started to trade away readability for not
+  quite enough height regained to be worth it.
+- Tests: `test_viz.py` (`draw_live_3d`/`update_live_3d` updated for the new
+  `bed_xy` argument and array-returning marker/path, `progressive_path_3d`
+  new: no-points-yet / first-point-appears / full-length-by-the-end).
+  **224 tests.**
+- Manual: re-ran the introspection-driving script — confirms no exception on
+  render (the numpy fix), the 3D path length grows monotonically as a
+  simulated run streams (`[0, 0, 0] … [12, 12, 12]` for the 12-move sample
+  file), the final marker lands on the last move's endpoint, and
+  `ax.get_box_aspect()` reflects the real X:Y:Z proportions (`[1.35, 1.35,
+  0.05]` for the square-bed, thin sample part — not stretched to `[1,1,1]`).
 
 ---
 

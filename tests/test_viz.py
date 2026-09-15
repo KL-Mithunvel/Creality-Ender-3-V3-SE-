@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 import pytest
@@ -93,17 +94,40 @@ def test_draw_live_layer_and_update_marker():
     assert list(art["marker"].get_ydata()) == [pt[1]]
 
 
-def test_draw_live_3d_and_update_marker():
+def test_draw_live_3d_and_update():
     tp = parse_toolpath(DATA / "sample.gcode")
     fig = Figure()
     ax = fig.add_subplot(1, 1, 1, projection="3d")
-    art = tf.draw_live_3d(ax, tp)
-    assert "marker" in art
+    art = tf.draw_live_3d(ax, tp, (220.0, 220.0))
+    assert "marker" in art and "path" in art
     assert len(art["marker"].get_data_3d()[0]) == 0
+    assert len(art["path"].get_data_3d()[0]) == 0
+    # equal mm-per-axis box aspect, covering both the part and the bed plate
+    assert ax.get_box_aspect() is not None
 
-    pt = tp.progress_position(tp.segments[-1].line_no)
-    tf.update_live_marker_3d(art, pt)
+    last_line = tp.segments[-1].line_no
+    pt = tp.progress_position(last_line)
+    tf.update_live_3d(art, tp, last_line)
     xs, ys, zs = art["marker"].get_data_3d()
     assert list(xs) == [pt[0]]
     assert list(ys) == [pt[1]]
     assert list(zs) == [pt[2]]
+    assert len(art["path"].get_data_3d()[0]) > 0  # the printed-so-far path grew
+
+
+def test_progressive_path_3d_only_includes_printed_extruding_moves():
+    tp = parse_toolpath(DATA / "sample.gcode")
+    first_extrude = next(s for s in tp.segments if s.extruding)
+
+    xs, ys, zs = tf.progressive_path_3d(tp, first_extrude.line_no - 1)
+    assert xs == [] and ys == [] and zs == []  # nothing printed yet
+
+    xs, ys, zs = tf.progressive_path_3d(tp, first_extrude.line_no)
+    assert xs[-1] == first_extrude.p1[0]
+    assert ys[-1] == first_extrude.p1[1]
+    assert zs[-1] == first_extrude.p1[2]
+
+    last_line = tp.segments[-1].line_no
+    xs_full, ys_full, zs_full = tf.progressive_path_3d(tp, last_line)
+    assert len(xs_full) >= len(xs)
+    assert xs_full[-1] == tp.segments[-1].p1[0] or math.isnan(xs_full[-1])

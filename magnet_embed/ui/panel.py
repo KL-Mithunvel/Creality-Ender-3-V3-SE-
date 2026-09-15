@@ -8,12 +8,14 @@ The whole panel is wrapped in a scrollable canvas (`_build_scroll_container`)
 so nothing gets clipped off-screen on a shorter display - everything below
 used to be built directly on `self`; it now lives in `self.body` instead.
 
-Embeds a small live-print view (current layer + nozzle marker + current-step
-G-code text, `_sync_live_view`) driven off `Controller.toolpath` /
-`progress_point` - derived from G-code line progress against the parsed
-toolpath, so it costs no extra printer traffic and never contends with the
-streaming loop's own serial handshake. A "3D" toggle swaps it for an isometric
-view of the whole part (`viz.toolpath_fig.draw_live_3d`).
+Embeds a small live-print view (`_sync_live_view`) driven off
+`Controller.toolpath` / `progress_point` - derived from G-code line progress
+against the parsed toolpath, so it costs no extra printer traffic and never
+contends with the streaming loop's own serial handshake. Two panels side by
+side, always both visible: the current layer in 2D, and an isometric 3D view
+of the whole bed + a path that grows as the nozzle actually passes through it
+(`viz.toolpath_fig.draw_live_3d`/`update_live_3d`) - plus a current-step
+G-code text line under both.
 """
 
 from __future__ import annotations
@@ -46,8 +48,8 @@ class ControlPanel(ttk.Frame):
         self._live_view_ticks = round(live_poll_s * 1000 / _POLL_MS) if live_poll_s > 0 else 0
         self._live_tp = None
         self._live_layer = -1
-        self._live_art: dict = {}
-        self.live_3d = False
+        self._live_art2d: dict = {}
+        self._live_art3d: dict = {}
         self._build_scroll_container()
         self._build()
         self.after(_POLL_MS, self._poll)
@@ -122,17 +124,25 @@ class ControlPanel(ttk.Frame):
         self.prog_lbl.pack(side="left", padx=6)
         row += 1
 
-        live = ttk.LabelFrame(b, text="Live print view", padding=4)
+        live = ttk.LabelFrame(b, text="Live print view  (2D layer / 3D bed, nozzle position)", padding=4)
         live.grid(row=row, column=0, sticky="ew", pady=(0, 4))
-        live_hdr = ttk.Frame(live)
-        live_hdr.pack(fill="x")
-        ttk.Label(live_hdr, text="current layer, nozzle position").pack(side="left")
-        self.btn_live_dim = ttk.Button(live_hdr, text="3D view", width=8, command=self._toggle_live_dim)
-        self.btn_live_dim.pack(side="right")
-        self.live_fig = Figure(figsize=(4.6, 3.0), dpi=90)
-        self.live_ax = self.live_fig.add_subplot(1, 1, 1)
-        self.live_canvas = FigureCanvasTkAgg(self.live_fig, master=live)
-        self.live_canvas.get_tk_widget().pack(fill="both", expand=True)
+        plots = ttk.Frame(live)
+        plots.pack(fill="both", expand=True)
+
+        live2d = ttk.Frame(plots)
+        live2d.pack(side="left", fill="both", expand=True)
+        self.live2d_fig = Figure(figsize=(2.1, 1.65), dpi=90)
+        self.live2d_ax = self.live2d_fig.add_subplot(1, 1, 1)
+        self.live2d_canvas = FigureCanvasTkAgg(self.live2d_fig, master=live2d)
+        self.live2d_canvas.get_tk_widget().pack(fill="both", expand=True)
+
+        live3d = ttk.Frame(plots)
+        live3d.pack(side="left", fill="both", expand=True, padx=(4, 0))
+        self.live3d_fig = Figure(figsize=(2.1, 1.65), dpi=90)
+        self.live3d_ax = self.live3d_fig.add_subplot(1, 1, 1, projection="3d")
+        self.live3d_canvas = FigureCanvasTkAgg(self.live3d_fig, master=live3d)
+        self.live3d_canvas.get_tk_widget().pack(fill="both", expand=True)
+
         self.live_line_lbl = ttk.Label(live, text="current step: —", anchor="w")
         self.live_line_lbl.pack(fill="x", pady=(4, 0))
         row += 1
@@ -229,7 +239,7 @@ class ControlPanel(ttk.Frame):
         self.state_lbl.grid(row=row, column=0, sticky="w", pady=(4, 2))
         row += 1
 
-        self.logbox = scrolledtext.ScrolledText(b, height=14, width=70, state="disabled")
+        self.logbox = scrolledtext.ScrolledText(b, height=8, width=70, state="disabled")
         self.logbox.grid(row=row, column=0, sticky="nsew")
         b.rowconfigure(row, weight=1)
         b.columnconfigure(0, weight=1)
@@ -279,56 +289,41 @@ class ControlPanel(ttk.Frame):
             self.c.load_gcode(path)
             self.file_lbl.configure(text=path.rsplit("/", 1)[-1])
 
-    def _toggle_live_dim(self) -> None:
-        """Swap the embedded live view between the 2D current-layer plot and
-        an isometric 3D view of the whole toolpath. Matplotlib can't change an
-        existing Axes' projection in place, so the figure is cleared and a
-        fresh Axes is added; that forces `_sync_live_view` to redraw from
-        scratch (`_live_tp` reset)."""
-        self.live_3d = not self.live_3d
-        self.live_fig.clf()
-        if self.live_3d:
-            self.live_ax = self.live_fig.add_subplot(1, 1, 1, projection="3d")
-            self.btn_live_dim.configure(text="2D view")
-        else:
-            self.live_ax = self.live_fig.add_subplot(1, 1, 1)
-            self.btn_live_dim.configure(text="3D view")
-        self._live_tp = None
-        self._live_layer = -1
-        self._live_art = {}
-        self._sync_live_view()
-
     def _sync_live_view(self) -> None:
-        """Redraw the embedded live-print canvas: the active layer's toolpath
-        (or, in 3D mode, the whole part) plus a marker at the nozzle position
-        implied by how far the run has streamed (`Controller.progress_point` -
-        derived from line progress against the parsed toolpath, no extra
-        printer traffic). Static (just the loaded file, no marker) before/after
-        a run."""
+        """Redraw both embedded live-print canvases: the active layer in 2D
+        (`live2d_*`) and the whole bed isometrically in 3D (`live3d_*`),
+        driven from `Controller.progress_point`/`current_line_text` - derived
+        from line progress against the parsed toolpath, no extra printer
+        traffic. The 2D layer redraws only when the active layer changes; the
+        3D path grows in place via `update_live_3d` rather than a full
+        redraw. Static (no marker/path) before a run starts."""
         tp = self.c.toolpath
         if tp is None:
             return
         if tp is not self._live_tp:
             self._live_tp = tp
             self._live_layer = -1
-            self._live_art = {}
+            self._live_art2d = {}
+            self._live_art3d = {}
         current_line, total = self.c.progress
 
-        if self.live_3d:
-            if not self._live_art:
-                self._live_art = tf.draw_live_3d(self.live_ax, tp)
-                self.live_fig.tight_layout()
-            if total:
-                tf.update_live_marker_3d(self._live_art, tp.progress_position(current_line))
-        else:
-            layer = tp.progress_layer(current_line) if total else 0
-            if layer != self._live_layer:
-                self._live_layer = layer
-                self._live_art = tf.draw_live_layer(self.live_ax, tp, layer)
-                self.live_fig.tight_layout()
-            if total:
-                tf.update_live_marker(self._live_art, tp.progress_position(current_line))
-        self.live_canvas.draw_idle()
+        layer = tp.progress_layer(current_line) if total else 0
+        if layer != self._live_layer:
+            self._live_layer = layer
+            self._live_art2d = tf.draw_live_layer(self.live2d_ax, tp, layer)
+            self.live2d_fig.tight_layout()
+        if total:
+            tf.update_live_marker(self._live_art2d, tp.progress_position(current_line))
+        self.live2d_canvas.draw_idle()
+
+        if not self._live_art3d:
+            machine = self.c.config.get("machine", {})
+            bed_xy = (machine.get("x_max", 220.0), machine.get("y_max", 220.0))
+            self._live_art3d = tf.draw_live_3d(self.live3d_ax, tp, bed_xy)
+            self.live3d_fig.tight_layout()
+        if total:
+            tf.update_live_3d(self._live_art3d, tp, current_line)
+        self.live3d_canvas.draw_idle()
 
         text = self.c.current_line_text.strip()
         self.live_line_lbl.configure(
