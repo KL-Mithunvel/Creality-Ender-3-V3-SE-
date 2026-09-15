@@ -290,16 +290,18 @@ hardware attached.
   `DispenserError`, `connect()` logs it, drops `self.dispenser` to `None`, and does
   not raise — the run continues printer-only. Default `False` keeps it strict.
 - Actions: `connect`, `load_gcode`, `jog`, `home`, `send_command` (raw G-code line),
-  `refresh_state` (poll `M105`+`M114`), `extrude` (mm+feed, negative = retract) —
-  all no-ops while a run is active, and all now surface a `PrinterError`/
-  `AckTimeout`/`ResendRequested` as an `error` event instead of raising — plus
-  `start_run`, `pause`, `resume`, `cancel`, `answer_prompt`.
-- `set_temp(which, value)` is the exception to "idle only": nozzle/bed heater
-  commands don't touch motion, so it's allowed **during a normal print**
-  (locked against the streaming loop — see Threading model) but refuses with a
-  log line while the magnet-insert sequence owns the heaters (`_in_insert`).
-  `value` is range-checked against `config['temps'][{nozzle,bed}_{min,max}_c]`
-  first — out of range or a link error both emit an `error` event, nothing is sent.
+  `extrude` (mm+feed, negative = retract) — all no-ops while a run is active, and
+  all now surface a `PrinterError`/`AckTimeout`/`ResendRequested` as an `error`
+  event instead of raising — plus `start_run`, `pause`, `resume`, `cancel`,
+  `answer_prompt`.
+- `set_temp(which, value)` and `refresh_state()` are the exception to "idle
+  only": neither touches motion (`M104`/`M140`/`M105`/`M400`/`M114`), so both
+  are allowed **during a normal print** (locked against the streaming loop —
+  see Threading model) but refuse (`set_temp`: log line; `refresh_state`:
+  silent no-op) while the magnet-insert sequence owns the printer (`_in_insert`).
+  `set_temp`'s `value` is range-checked against
+  `config['temps'][{nozzle,bed}_{min,max}_c]` first — out of range or a link
+  error both emit an `error` event, nothing is sent.
 - Properties: `connected`, `progress` → `(current_line, total_lines)`.
 - Event kinds: `log`, `state` (a `PrinterState`), `prompt` (`"dispense"`/`"confirm"`),
   `done`, `error`.
@@ -487,12 +489,10 @@ parks, magnet dispensed, controlled press + lateral shear run, print resumes and
   real run uses the true position at the sentinel. Fine for a sanity check; the
   envelope numbers can differ slightly from the live run if the print is far from
   the pocket XY when it pauses.
-- **No periodic temp polling during an active print.** `set_temp` works mid-print
-  (see Threading model), but nothing emits a `state` event on its own while
-  `GcodeRunner.run()` is just streaming ordinary lines, so the panel's `now:`
-  labels only refresh right after you call `set_temp`/jog/home/extrude/connect —
-  not continuously. A periodic `M105` during a run (behind the same
-  `_printer_lock`, on a Tk `after()` timer) would fix this; not built yet.
+- ~~No periodic temp polling during an active print~~ — fixed: `refresh_state()`
+  now runs on the normal `ui.idle_poll_s` timer during a run too (locked, and
+  blocked only during an active insert), so the panel's `now:` labels stay live
+  throughout an ordinary print, not just right after an explicit action.
 - **`temps.nozzle_max_c` (260°C) / `bed_max_c` (100°C) in `config.yaml` are
   conservative guesses**, not the Ender-3 V3 SE's real firmware `MAXTEMP`/bed
   ceiling — they only gate the host-side `set_temp` UI, they are not read from

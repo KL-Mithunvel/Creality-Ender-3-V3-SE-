@@ -204,10 +204,9 @@ class ControlPanel(ttk.Frame):
         if (
             self._idle_poll_ticks
             and self.c.connected
-            and not self.c.running
             and self._tick % self._idle_poll_ticks == 0
         ):
-            self.c.refresh_state()
+            self.c.refresh_state()  # safe during a run too - see Controller.refresh_state
 
         if self.c.running:
             done, total = self.c.progress

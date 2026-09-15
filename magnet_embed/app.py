@@ -198,15 +198,19 @@ class Controller:
         self._emit_state()
 
     def refresh_state(self) -> None:
-        """Poll temps + position. No-op when disconnected or while a run is active."""
-        if not self._connected or self.running:
+        """Poll temps + position. No-op when disconnected or mid-insert; safe to
+        call during a normal print (locked against the streaming loop) since it
+        only reads (`M105`/`M400`/`M114`), same reasoning as `set_temp`."""
+        if not self._connected or self._in_insert:
             return
-        try:
-            self.printer.command("M105")
-        except (PrinterError, AckTimeout, ResendRequested) as exc:
-            self._emit("error", f"{type(exc).__name__}: {exc}")
-            return
-        self._emit_state()
+        with self._printer_lock:
+            try:
+                self.printer.command("M105")
+                state = self.printer.query_state()
+            except (PrinterError, AckTimeout, ResendRequested) as exc:
+                self._emit("error", f"{type(exc).__name__}: {exc}")
+                return
+        self._emit("state", state)
 
     def extrude(self, mm: float, feed: float) -> None:
         """Extrude `mm` at `feed` mm/min (negative `mm` = retract). Idle only."""

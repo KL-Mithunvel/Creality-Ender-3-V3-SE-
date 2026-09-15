@@ -210,15 +210,29 @@ def test_refresh_state_noop_when_not_connected(config):
     assert ctl.printer.sent == []
 
 
-def test_refresh_state_noop_while_running(config):
+def test_refresh_state_allowed_while_running(config):
+    """Unlike jog/home/extrude, refresh_state is read-only (M105/M400/M114) so
+    it's safe to poll during a normal print - locked against the streaming loop."""
     ctl = _ctl(config, delay=0.03)
     ctl.load_gcode(SAMPLE)
     ctl.start_run()
     assert _wait(lambda: ctl.running)
+    ctl.refresh_state()
+    assert "M105" in ctl.printer.sent
+    assert any(k == "state" for k, _ in ctl.poll_events())
+    _pump_until(ctl, "done", answer="success")
+
+
+def test_refresh_state_blocked_during_insert_sequence(config):
+    ctl = _ctl(config, delay=0.03)
+    ctl.load_gcode(SAMPLE)
+    ctl.start_run()
+    _pump_until(ctl, "prompt")  # stop right at the confirm prompt; don't answer yet
     before = list(ctl.printer.sent)
     ctl.refresh_state()
     assert ctl.printer.sent == before
-    _pump_until(ctl, "done", answer="success")
+    ctl.answer_prompt("success")
+    _pump_until(ctl, "done")
 
 
 def test_extrude_then_retract(config):
