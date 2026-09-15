@@ -48,6 +48,46 @@ The `python -m magnet_embed.main*` modules still work (thin wrappers) for
 back-compat. Run the pre-hardware checklist in `.CLAUDE/CLAUDE.md` before
 `--printer` / `--hardware`.
 
+## Testing & sanity checks
+
+Everything below assumes `.venv` is active (`.venv\Scripts\activate`).
+
+**Automated tests — no hardware needed:**
+
+```bat
+python -m pytest                          :: full suite (185 tests)
+python -m py_compile main.py magnet_embed\*.py magnet_embed\ui\*.py magnet_embed\gcode\*.py magnet_embed\sequences\*.py magnet_embed\links\*.py magnet_embed\viz\*.py
+```
+
+**Serial sanity tests — need the real hardware plugged in:**
+
+```bat
+python main.py --printer --ping                          :: printer only, no GUI
+python main.py --hardware --ping                         :: printer + Arduino Uno (Phase 2)
+python -m magnet_embed.links.printer_serial --ping       :: printer link in isolation (M115/M400/M114)
+python -m magnet_embed.links.dispenser_serial --ping      :: Uno link in isolation (-> PONG); Phase 2, not built yet
+```
+
+**Running `main.py` with a G-code file loaded:**
+
+```bat
+python main.py                                                          :: GUI, no file — load one from the panel
+python main.py --sim tests\data\sample.gcode --no-gui --confirm success :: headless sim run, auto-confirms the insert prompt
+python main.py --printer part.gcode                                     :: real printer, GUI opens with the file pre-loaded
+python main.py --hardware part.magnet.gcode                             :: real printer + Uno, GUI pre-loaded
+python main.py --preview part.magnet.gcode                              :: toolpath + insert-motion preview, then exits (no streaming)
+```
+
+**Preparing a `*.magnet.gcode` for a test run** (or use the panel's **Plan magnet
+insert…** dialog, which does the same and auto-loads the result):
+
+```bat
+python -m magnet_embed.gcode.postprocess part.gcode --layer 40 --xy 120.5 98 --seat-z 6.2 --shear +X -o part.magnet.gcode
+```
+
+Run the "Pre-hardware checklist" in `.CLAUDE/CLAUDE.md` → Deployment Notes before
+the first `--printer` / `--hardware` run on a given machine.
+
 ## Documents
 
 | File | What |
@@ -63,13 +103,16 @@ back-compat. Run the pre-hardware checklist in `.CLAUDE/CLAUDE.md` before
 
 ## Status
 
-**Phase 1 + Phase 1.6 software complete (170 tests).** One `python main.py`
+**Phase 1 + Phase 1.6 software complete (185 tests).** One `python main.py`
 (mode by flag) drives the whole workflow against a simulated printer + dispenser:
 import a slice → visualise the toolpath → simulate the magnet-insert motion →
 place the sentinel and save `*.magnet.gcode` → stream it → park / dispense / press /
-shear / Success·Retry·Abort / resume. The panel has jog/home, raw G-code, temps,
-extrude/retract, idle polling and a run-progress bar. The **printer serial link is
-verified on real hardware** (COM3).
+shear / Success·Retry·Abort / resume. The panel has jog/home, raw G-code,
+extrude/retract, idle polling and a run-progress bar. Nozzle/bed **temperature
+can be changed even during a print** (locked against the streaming loop, blocked
+only while the magnet-insert sequence owns the heaters), with the allowed range
+and a live current-temp readout shown next to each entry. The **printer serial
+link is verified on real hardware** (COM3).
 
 Next for the magnet flow: build the clip-on applicator + Arduino sketch, measure
 the tool offset, run the manual hardware smoke test. See `project/BUILD_PLAN.md`

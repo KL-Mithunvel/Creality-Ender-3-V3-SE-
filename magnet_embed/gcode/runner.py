@@ -37,6 +37,7 @@ class GcodeRunner:
         gcode_path: str | Path,
         on_sentinel: OnSentinel,
         config: dict,
+        lock: threading.Lock | None = None,
     ) -> None:
         self.link = link
         self.path = Path(gcode_path)
@@ -44,6 +45,12 @@ class GcodeRunner:
         self._token = config["gcode"]["sentinel_token"]
         self._require_sentinel = bool(config["gcode"].get("require_sentinel", False))
         self._ack_timeout = config["printer"]["ack_timeout_s"]
+        # Shared with `Controller` so an out-of-band command (currently only
+        # `set_temp`) can't interleave its send/`ok` with a streamed line's -
+        # both would be reading replies off the same serial connection.
+        # Defaults to a private lock when run standalone (headless/tests),
+        # where nothing else touches `link` concurrently anyway.
+        self._lock = lock if lock is not None else threading.Lock()
 
         self._resume_evt = threading.Event()
         self._resume_evt.set()            # set == running, clear == paused
@@ -116,8 +123,9 @@ class GcodeRunner:
                 )
                 continue
 
-            self.link.send_line(raw)
-            self.link.wait_ok(self._ack_timeout)
+            with self._lock:
+                self.link.send_line(raw)
+                self.link.wait_ok(self._ack_timeout)
             self.sent_lines += 1
 
         self.finished = True

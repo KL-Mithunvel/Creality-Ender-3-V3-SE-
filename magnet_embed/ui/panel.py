@@ -84,20 +84,35 @@ class ControlPanel(ttk.Frame):
         ttk.Button(jog, text="Home", command=self.c.home).grid(row=1, column=2, padx=8)
         row += 1
 
-        temp = ttk.LabelFrame(self, text="Temperature", padding=6)
+        temp = ttk.LabelFrame(self, text="Temperature  (works during a print too)", padding=6)
         temp.grid(row=row, column=0, sticky="ew", pady=4)
+        temps_cfg = self.c.config.get("temps", {})
+        noz_lo = temps_cfg.get("nozzle_min_c", 0)
+        noz_hi = temps_cfg.get("nozzle_max_c", 260)
+        bed_lo = temps_cfg.get("bed_min_c", 0)
+        bed_hi = temps_cfg.get("bed_max_c", 100)
+
         ttk.Label(temp, text="nozzle").grid(row=0, column=0)
         self.noz = ttk.Entry(temp, width=6)
         self.noz.insert(0, "0")
         self.noz.grid(row=0, column=1, padx=2)
         ttk.Button(temp, text="Set", width=4,
                    command=lambda: self.c.set_temp("nozzle", _to_int(self.noz))).grid(row=0, column=2)
-        ttk.Label(temp, text="bed").grid(row=0, column=3, padx=(12, 0))
+        self.noz_now = ttk.Label(temp, text="now: —", width=16)
+        self.noz_now.grid(row=0, column=3, padx=(10, 0))
+        ttk.Label(temp, text=f"allowed {noz_lo:g}–{noz_hi:g}°C",
+                  foreground="gray").grid(row=1, column=0, columnspan=4, sticky="w")
+
+        ttk.Label(temp, text="bed").grid(row=2, column=0, pady=(8, 0))
         self.bed = ttk.Entry(temp, width=6)
         self.bed.insert(0, "0")
-        self.bed.grid(row=0, column=4, padx=2)
+        self.bed.grid(row=2, column=1, padx=2, pady=(8, 0))
         ttk.Button(temp, text="Set", width=4,
-                   command=lambda: self.c.set_temp("bed", _to_int(self.bed))).grid(row=0, column=5)
+                   command=lambda: self.c.set_temp("bed", _to_int(self.bed))).grid(row=2, column=2, pady=(8, 0))
+        self.bed_now = ttk.Label(temp, text="now: —", width=16)
+        self.bed_now.grid(row=2, column=3, padx=(10, 0), pady=(8, 0))
+        ttk.Label(temp, text=f"allowed {bed_lo:g}–{bed_hi:g}°C",
+                  foreground="gray").grid(row=3, column=0, columnspan=4, sticky="w")
         row += 1
 
         fil = ttk.LabelFrame(self, text="Filament  (idle only)", padding=6)
@@ -211,6 +226,8 @@ class ControlPanel(ttk.Frame):
                   f"nozzle {st.nozzle_temp:.0f}/{st.nozzle_target:.0f}   "
                   f"bed {st.bed_temp:.0f}/{st.bed_target:.0f}")
         )
+        self.noz_now.configure(text=f"now: {st.nozzle_temp:.0f}/{st.nozzle_target:.0f}°C")
+        self.bed_now.configure(text=f"now: {st.bed_temp:.0f}/{st.bed_target:.0f}°C")
 
     def _refresh_buttons(self) -> None:
         running = self.c.running

@@ -59,7 +59,7 @@ involvement is acceptable at this stage.
 
 ## Running the System
 
-> Build status: **C1–C8 + Phase 1.6 (C13–C19) done — 170 tests** (`project/BUILD_PLAN.md`).
+> Build status: **C1–C8 + Phase 1.6 (C13–C19) done, plus mid-print temp control — 185 tests** (`project/BUILD_PLAN.md`).
 > One root `python main.py` (mode by flag), `gcode/toolpath.py`, shared
 > `sequences/geometry.py`, a matplotlib toolpath + insert-motion preview
 > (`main.py --preview`), a "Plan magnet insert…" dialog that saves
@@ -116,7 +116,7 @@ back-compat wrappers that call `entry` with a fixed mode.
 
 | Path | Role |
 |------|------|
-| `magnet_embed/config.yaml` | All ports, baud, park/safe-Z, temps, the magnet-tool XYZ offset, press/shear distances + feeds, sentinel token. Nothing hardware-specific is hardcoded elsewhere. |
+| `magnet_embed/config.yaml` | All ports, baud, park/safe-Z, temps (incl. `nozzle_min_c`/`nozzle_max_c`/`bed_min_c`/`bed_max_c` guard rails for `set_temp`), the magnet-tool XYZ offset, press/shear distances + feeds, sentinel token. Nothing hardware-specific is hardcoded elsewhere. |
 | `main.py` (repo root) | **The** entry point. `--sim` (default) / `--printer` / `--hardware`; `--ping`, `--no-gui` (headless + `--confirm`), `--no-dispenser`, `--config`. All it does is parse args and call `magnet_embed.entry`. |
 | `magnet_embed/entry.py` | Shared wiring: `build_links(mode, config)` → `(printer, dispenser)`; `ping()`; `run_headless()`; `launch_panel()`. One place that constructs links and runs the smoke test. |
 | `magnet_embed/main.py` / `main_printer.py` / `main_sim.py` | Back-compat `python -m …` wrappers — each parses its small CLI and calls `entry` with a fixed mode (`hardware` / `printer` / `sim`). The Uno stays optional in `hardware` mode: a dispenser that fails to connect degrades to printer-only for the session. |
@@ -190,6 +190,17 @@ No `G28` anywhere — every move after `SAVE` is commanded and tracked (Dev Rule
 - Each serial link has its own reader thread.
 - Threads talk to the UI through a thread-safe queue polled via `root.after(...)`.
   No Tkinter calls off the main thread.
+- `Controller._printer_lock` (a `threading.Lock`) guards every `printer.command()`/
+  `query_state()` call that could otherwise run concurrently with the worker
+  thread's own send/`ok` handshake. `jog`/`home`/`extrude`/`send_command`/
+  `refresh_state` stay idle-only (`self.running` guard) so they never need it.
+  `set_temp` is the one action allowed to run *during* a print — it takes the
+  lock, and `GcodeRunner.run()` (constructed with the same lock in `start_run()`)
+  takes it around each streamed line's send+`ok`, so the two can't interleave on
+  the shared serial connection. `set_temp` additionally checks `Controller._in_insert`
+  and refuses while `sequences.insert_magnet` is driving the printer directly
+  (unlocked, on the worker thread) — the sequence owns the heaters during the
+  pause (Dev Rule 6).
 
 ### Simulation vs real
 
@@ -278,10 +289,17 @@ hardware attached.
 - `dispenser_optional=True` (used by `--hardware`): if `dispenser.connect()` raises a
   `DispenserError`, `connect()` logs it, drops `self.dispenser` to `None`, and does
   not raise — the run continues printer-only. Default `False` keeps it strict.
-- Actions: `connect`, `load_gcode`, `jog`, `home`, `set_temp`, `send_command` (raw
-  G-code line), `refresh_state` (poll `M105`+`M114`), `extrude` (mm+feed, negative =
-  retract) — all no-ops while a run is active — plus `start_run`, `pause`, `resume`,
-  `cancel`, `answer_prompt`.
+- Actions: `connect`, `load_gcode`, `jog`, `home`, `send_command` (raw G-code line),
+  `refresh_state` (poll `M105`+`M114`), `extrude` (mm+feed, negative = retract) —
+  all no-ops while a run is active, and all now surface a `PrinterError`/
+  `AckTimeout`/`ResendRequested` as an `error` event instead of raising — plus
+  `start_run`, `pause`, `resume`, `cancel`, `answer_prompt`.
+- `set_temp(which, value)` is the exception to "idle only": nozzle/bed heater
+  commands don't touch motion, so it's allowed **during a normal print**
+  (locked against the streaming loop — see Threading model) but refuses with a
+  log line while the magnet-insert sequence owns the heaters (`_in_insert`).
+  `value` is range-checked against `config['temps'][{nozzle,bed}_{min,max}_c]`
+  first — out of range or a link error both emit an `error` event, nothing is sent.
 - Properties: `connected`, `progress` → `(current_line, total_lines)`.
 - Event kinds: `log`, `state` (a `PrinterState`), `prompt` (`"dispense"`/`"confirm"`),
   `done`, `error`.
@@ -289,10 +307,18 @@ hardware attached.
 ### `ui/panel.py` — `ControlPanel` + `run_gui(controller)`
 - Thin Tkinter view over a `Controller`. Connect, load G-code, run/pause/resume/cancel,
   a run-progress bar, jog (0.1/1/10 mm) + home + raw G-code entry + extrude/retract
-  **idle only**, set temps, "Plan magnet insert…", read-only log, live position/temp
-  line. Auto-refreshes state every `ui.idle_poll_s` while connected + idle.
+  **idle only**, "Plan magnet insert…", read-only log, live position/temp line.
+  Auto-refreshes state every `ui.idle_poll_s` while connected + idle.
   `_show_prompt` opens a modal **Success / Retry / Abort** (or **Ready / Abort**)
   dialog that calls `controller.answer_prompt`. Drains `poll_events()` every 120 ms.
+- Temperature panel is *not* idle-gated (`set_temp` works mid-print, see `app.py`):
+  each of the nozzle/bed rows shows the allowed range from
+  `config['temps'][{nozzle,bed}_{min,max}_c]` and a live `now: A/B°C` label
+  (actual/target) updated from every `state` event — not just the polled-while-idle
+  ones, so it also refreshes right after a `set_temp` call made during a print.
+  Note: with no sentinel and no explicit `set_temp`/jog/home/extrude/connect call,
+  nothing emits a `state` event mid-stream, so the `now:` label can go briefly
+  stale during a long ordinary print — seen the real value again on your next Set.
 
 ---
 
@@ -445,7 +471,7 @@ parks, magnet dispensed, controlled press + lateral shear run, print resumes and
 ## Known Technical Debt
 
 - **No hardware validation of the magnet flow yet.** The whole stack is proven
-  against `SimPrinter` / `SimDispenser` (170 tests); only the printer *serial link*
+  against `SimPrinter` / `SimDispenser` (185 tests); only the printer *serial link*
   has run on the real machine (COM3). The first magnet-flow bench session may
   surface firmware-serial quirks (the Ender-3 V3 SE has known OctoPrint friction)
   and mechanism issues. Treat it as debugging, not production.
@@ -461,6 +487,16 @@ parks, magnet dispensed, controlled press + lateral shear run, print resumes and
   real run uses the true position at the sentinel. Fine for a sanity check; the
   envelope numbers can differ slightly from the live run if the print is far from
   the pocket XY when it pauses.
+- **No periodic temp polling during an active print.** `set_temp` works mid-print
+  (see Threading model), but nothing emits a `state` event on its own while
+  `GcodeRunner.run()` is just streaming ordinary lines, so the panel's `now:`
+  labels only refresh right after you call `set_temp`/jog/home/extrude/connect —
+  not continuously. A periodic `M105` during a run (behind the same
+  `_printer_lock`, on a Tk `after()` timer) would fix this; not built yet.
+- **`temps.nozzle_max_c` (260°C) / `bed_max_c` (100°C) in `config.yaml` are
+  conservative guesses**, not the Ender-3 V3 SE's real firmware `MAXTEMP`/bed
+  ceiling — they only gate the host-side `set_temp` UI, they are not read from
+  the printer. Raise them in `config.local.yaml` if your hotend/bed is rated higher.
 
 No rule violations recorded. Add any here (file + line) as they appear; do not omit.
 

@@ -241,6 +241,91 @@ def test_extrude_ignored_while_running(config):
     _pump_until(ctl, "done", answer="success")
 
 
+def _boom(_line, timeout_s=None):
+    from magnet_embed.exceptions import PrinterError
+
+    raise PrinterError("boom")
+
+
+def test_jog_surfaces_printer_error(config):
+    ctl = _ctl(config)
+    ctl.printer.command = _boom
+    ctl.jog("X", 5.0)
+    assert any(k == "error" for k, _ in ctl.poll_events())
+
+
+def test_home_surfaces_printer_error(config):
+    ctl = _ctl(config)
+    ctl.printer.command = _boom
+    ctl.home()
+    assert any(k == "error" for k, _ in ctl.poll_events())
+
+
+def test_extrude_surfaces_printer_error(config):
+    ctl = _ctl(config)
+    ctl.printer.command = _boom
+    ctl.extrude(5.0, 300.0)
+    assert any(k == "error" for k, _ in ctl.poll_events())
+
+
+# --- temp range guard + mid-print temp change ------------------------
+
+def test_set_temp_within_range_sends_command(config):
+    ctl = _ctl(config)
+    ctl.set_temp("nozzle", 200)
+    assert "M104 S200" in ctl.printer.sent
+
+
+def test_set_temp_rejects_above_max(config):
+    ctl = _ctl(config)
+    ctl.poll_events()
+    before = list(ctl.printer.sent)
+    ctl.set_temp("nozzle", 999)
+    assert ctl.printer.sent == before
+    assert any(k == "error" and "outside" in str(p) for k, p in ctl.poll_events())
+
+
+def test_set_temp_rejects_below_min(config):
+    ctl = _ctl(config)
+    ctl.poll_events()
+    before = list(ctl.printer.sent)
+    ctl.set_temp("bed", -5)
+    assert ctl.printer.sent == before
+    assert any(k == "error" for k, _ in ctl.poll_events())
+
+
+def test_set_temp_surfaces_printer_error(config):
+    ctl = _ctl(config)
+    ctl.printer.command = _boom
+    ctl.set_temp("nozzle", 200)
+    assert any(k == "error" for k, _ in ctl.poll_events())
+
+
+def test_set_temp_allowed_while_running(config):
+    """Unlike jog/home/extrude, set_temp is not idle-only - it's safe mid-print
+    (M104/M140 don't touch motion) and is locked against the streaming loop."""
+    ctl = _ctl(config, delay=0.03)
+    ctl.load_gcode(SAMPLE)
+    ctl.start_run()
+    assert _wait(lambda: ctl.running)
+    ctl.set_temp("nozzle", 200)
+    assert "M104 S200" in ctl.printer.sent
+    _pump_until(ctl, "done", answer="success")
+
+
+def test_set_temp_blocked_during_insert_sequence(config):
+    ctl = _ctl(config, delay=0.03)
+    ctl.load_gcode(SAMPLE)
+    ctl.start_run()
+    _pump_until(ctl, "prompt")  # stop right at the confirm prompt; don't answer yet
+    before = list(ctl.printer.sent)
+    ctl.set_temp("nozzle", 200)
+    assert ctl.printer.sent == before
+    assert any(k == "log" and "insert sequence owns" in str(p) for k, p in ctl.poll_events())
+    ctl.answer_prompt("success")
+    _pump_until(ctl, "done")
+
+
 def test_progress_zero_then_advances_then_final(config):
     ctl = _ctl(config, delay=0.02)
     assert ctl.progress == (0, 0)

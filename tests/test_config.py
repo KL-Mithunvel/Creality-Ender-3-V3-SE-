@@ -26,7 +26,8 @@ def test_local_override_is_merged(tmp_path):
         "magnet_tool_offset: {x: 1, y: 2, z: 3}\n"
         "park: {x: 5, y: 5, safe_z_lift_mm: 15}\n"
         "travel: {feed: 6000}\n"
-        "temps: {standby_nozzle_c: 160}\n"
+        "temps: {standby_nozzle_c: 160, nozzle_min_c: 0, nozzle_max_c: 260, "
+        "bed_min_c: 0, bed_max_c: 100}\n"
         "retract: {mm: 3, feed: 2400}\n"
         "prime: {mm: 2, feed: 300}\n"
         "press: {feed: 60, dwell_ms: 500}\n"
@@ -67,5 +68,27 @@ def test_validate_rejects_bad_idle_poll():
     with pytest.raises(ValueError):
         _validate(cfg)
     cfg["ui"]["idle_poll_s"] = "fast"
+    with pytest.raises(ValueError):
+        _validate(cfg)
+
+
+def test_temp_range_defaults_present():
+    cfg = load_config()
+    assert cfg["temps"]["nozzle_min_c"] < cfg["temps"]["nozzle_max_c"]
+    assert cfg["temps"]["bed_min_c"] < cfg["temps"]["bed_max_c"]
+
+
+def test_validate_rejects_bad_temp_range():
+    import pytest
+
+    from magnet_embed.config import _validate
+
+    cfg = load_config()
+    cfg["temps"]["nozzle_min_c"] = cfg["temps"]["nozzle_max_c"]
+    with pytest.raises(ValueError):
+        _validate(cfg)
+
+    cfg = load_config()
+    cfg["temps"]["bed_min_c"] = cfg["temps"]["bed_max_c"] + 1
     with pytest.raises(ValueError):
         _validate(cfg)

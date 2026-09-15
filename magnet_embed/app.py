@@ -58,6 +58,17 @@ class Controller:
         self._worker: threading.Thread | None = None
         self._runlog: RunLog | None = None
         self._connected = False
+        # Guards every printer.command()/query_state() call that can happen
+        # concurrently with the run worker's own streaming loop. Shared with
+        # `GcodeRunner` (passed in `start_run`) so `set_temp` can safely run
+        # mid-print without its request getting interleaved with a streamed
+        # line's send/ok handshake.
+        self._printer_lock = threading.Lock()
+        # True only while `sequences.insert_magnet` is driving the printer
+        # directly (unlocked, on the worker thread) - `set_temp` must not run
+        # concurrently with that (Dev Rule 6: the sequence owns the heaters
+        # during the pause).
+        self._in_insert = False
 
     # --- state -------------------------------------------------------
 
@@ -117,26 +128,56 @@ class Controller:
             self._emit("log", "jog ignored - a run is active")
             return
         feed = self.config["travel"]["feed"]
-        self.printer.command("G91")
-        self.printer.command(f"G1 {axis.upper()}{distance:g} F{feed:g}")
-        self.printer.command("G90")
+        try:
+            self.printer.command("G91")
+            self.printer.command(f"G1 {axis.upper()}{distance:g} F{feed:g}")
+            self.printer.command("G90")
+        except (PrinterError, AckTimeout, ResendRequested) as exc:
+            self._emit("error", f"{type(exc).__name__}: {exc}")
+            return
         self._emit_state()
 
     def home(self) -> None:
         if self.running:
             self._emit("log", "home ignored - a run is active")
             return
-        self.printer.command("G28")
+        try:
+            self.printer.command("G28")
+        except (PrinterError, AckTimeout, ResendRequested) as exc:
+            self._emit("error", f"{type(exc).__name__}: {exc}")
+            return
         self._emit("log", "homed")
         self._emit_state()
 
     def set_temp(self, which: str, value: float) -> None:
-        if self.running:
-            self._emit("log", "temp change ignored - a run is active")
+        """Set the nozzle/bed target. Range-checked; allowed during a normal
+        print (locked against the streaming loop) but not while the magnet
+        insert sequence owns the heaters."""
+        if self._in_insert:
+            self._emit(
+                "log",
+                "temp change ignored - the magnet insert sequence owns the heaters right now",
+            )
+            return
+        lo_key, hi_key = (
+            ("nozzle_min_c", "nozzle_max_c") if which == "nozzle" else ("bed_min_c", "bed_max_c")
+        )
+        lo, hi = self.config["temps"][lo_key], self.config["temps"][hi_key]
+        if not lo <= value <= hi:
+            self._emit(
+                "error",
+                f"{which} target {value:g}°C outside the allowed range {lo:g}-{hi:g}°C",
+            )
             return
         code = "M104" if which == "nozzle" else "M140"
-        self.printer.command(f"{code} S{value:g}")
-        self._emit_state()
+        with self._printer_lock:
+            try:
+                self.printer.command(f"{code} S{value:g}")
+                state = self.printer.query_state()
+            except (PrinterError, AckTimeout, ResendRequested) as exc:
+                self._emit("error", f"{type(exc).__name__}: {exc}")
+                return
+        self._emit("state", state)
 
     def send_command(self, line: str) -> None:
         """Send one raw G-code line and echo the reply to the log. Idle only."""
@@ -172,8 +213,12 @@ class Controller:
         if self.running:
             self._emit("log", "extrude/retract ignored - a run is active")
             return
-        self.printer.command("M83")
-        self.printer.command(f"G1 E{mm:g} F{feed:g}")
+        try:
+            self.printer.command("M83")
+            self.printer.command(f"G1 E{mm:g} F{feed:g}")
+        except (PrinterError, AckTimeout, ResendRequested) as exc:
+            self._emit("error", f"{type(exc).__name__}: {exc}")
+            return
         self._emit_state()
 
     def start_run(self) -> None:
@@ -185,7 +230,8 @@ class Controller:
         if self.log_dir is not None:
             self._runlog = new_run_log(self.log_dir, self.gcode_path.stem)
         self.runner = GcodeRunner(
-            self.printer, self.gcode_path, self._on_sentinel, self.config
+            self.printer, self.gcode_path, self._on_sentinel, self.config,
+            lock=self._printer_lock,
         )
         self._worker = threading.Thread(target=self._run, name="gcode-runner", daemon=True)
         self._worker.start()
@@ -233,7 +279,11 @@ class Controller:
             "log",
             f"MAGNET_INSERT X{mi.pocket_x:g} Y{mi.pocket_y:g} Z{mi.seat_z:g} {mi.shear_dir}",
         )
-        insert_magnet(self.printer, self.dispenser, mi, self.config, self._prompt)
+        self._in_insert = True
+        try:
+            insert_magnet(self.printer, self.dispenser, mi, self.config, self._prompt)
+        finally:
+            self._in_insert = False
         self._emit("log", "insert sequence complete")
         self._emit_state()
 

@@ -422,3 +422,53 @@ smoke test.
   Added a `__package__ in (None, "")` sys.path bootstrap + switched the three
   `magnet_embed/main*.py` to absolute imports. `tests/test_entrypoints_as_scripts.py`
   runs all four entry files with `--help` via subprocess. 174 tests.
+
+## 2026-09-15 — First bench session on the real printer; mid-print temp control
+
+- Owner had the printer on the bench for the first time this session. Verified:
+  `pytest` 174/174 green, `.venv` intact, `COM3` enumerated, `python main.py
+  --printer --ping` OK (`X134.25 Y125.0 Z10.0`, nozzle cold). Streamed
+  `Cube_PETG_7m59s.gcode` over `--printer` — real hardware, no sentinel involved.
+- **Extrude button investigated** — looked broken ("does nothing"). Root cause
+  wasn't a code bug: nozzle was at 0°C and Marlin's cold-extrusion guard blocks
+  the motor while still replying `ok`, so nothing moved and nothing errored.
+  Confirmed by the owner after reheating. Real gap found along the way and
+  fixed anyway: `Controller.jog`/`home`/`extrude` didn't catch
+  `PrinterError`/`AckTimeout`/`ResendRequested` the way `send_command` already
+  did — an exception there would have escaped a Tkinter button callback
+  silently (printed to stderr, nothing shown in the panel). Now all four wrap
+  it and emit an `error` event.
+- **Owner asked for**: current temp visible in the GUI, min/max info next to
+  the entries, proper error handling, and whether changing temp mid-print
+  makes sense. Answers built in:
+  - `config.yaml` `temps.{nozzle,bed}_{min,max}_c` (0–260°C nozzle, 0–100°C bed;
+    override in `config.local.yaml` for a hotend rated higher) — required +
+    numeric in `config.py`, plus a `min < max` sanity check.
+  - `Controller.set_temp` now range-checks against those before sending, and is
+    the one action allowed to run **during a print** (M104/M140 don't touch
+    motion, unlike jog/home/extrude) — reused across a real print, not just at
+    idle, matching how every other print host (Cura/OctoPrint/Pronterface)
+    behaves. Made safe with a `threading.Lock` shared between `Controller` and
+    a `GcodeRunner(lock=...)` param, so the out-of-band `M104`/`M140` send/`ok`
+    can't interleave with the streaming loop's own send/`ok` on the same
+    serial connection. Blocked separately (`_in_insert` flag) while
+    `sequences.insert_magnet` is mid-sequence, since that code drives the
+    printer directly and unlocked, and Dev Rule 6 says the sequence owns the
+    heaters during the pause.
+  - `ui/panel.py`: Temperature frame no longer reads "(idle only)"; each
+    nozzle/bed row shows `allowed <min>-<max>°C` and a live `now: A/B°C` label
+    driven off every `state` event (updates right after a mid-print `set_temp`,
+    not only the idle-poll ticks).
+- 11 new tests (`test_config.py` +2, `test_app.py` +9) covering: range rejection
+  both directions, mid-print `set_temp` succeeding, `set_temp` blocked during
+  an active insert, and `PrinterError` surfacing for `jog`/`home`/`extrude`/
+  `set_temp`. 185 tests total, `py_compile` clean, panel smoke-tested headless
+  (`root.withdraw()`) — labels update on `connect()` and on `set_temp()`.
+- Docs synced: `.CLAUDE/CLAUDE.md` (Threading model, `app.py`/`ui/panel.py`
+  Key Modules, `config.yaml` module-table row, Known Technical Debt — flagged
+  that there's still no periodic `M105` poll *during* a run, so the `now:`
+  label only refreshes on an explicit action, and that the new max-temp guard
+  rails are host-side UI limits, not read from the printer's real firmware
+  ceiling).
+- Not done yet: live temp polling *during* an ordinary print (would need a
+  periodic locked `M105` on a Tk timer); still no applicator/Uno on the bench.

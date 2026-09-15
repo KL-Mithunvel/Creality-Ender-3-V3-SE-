@@ -37,6 +37,10 @@ park:
 temps:
   standby_nozzle_c: 160 # drop the nozzle here during the pause
   reheat_wait: true     # use M109 (wait) on resume
+  nozzle_min_c: 0        # UI guard rail - Set Temp rejects targets outside this range
+  nozzle_max_c: 260      # Sprite hotend safe ceiling; raise here (or config.local.yaml) if yours is rated higher
+  bed_min_c: 0
+  bed_max_c: 100         # V3 SE stock bed ceiling
 
 travel:
   feed: 6000            # mm/min for non-print rapid moves (park, approach, resume)

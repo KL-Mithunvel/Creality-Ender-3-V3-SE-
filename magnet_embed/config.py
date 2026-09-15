@@ -33,6 +33,10 @@ _REQUIRED_KEYS: tuple[tuple[str, str], ...] = (
     ("park", "safe_z_lift_mm"),
     ("travel", "feed"),
     ("temps", "standby_nozzle_c"),
+    ("temps", "nozzle_min_c"),
+    ("temps", "nozzle_max_c"),
+    ("temps", "bed_min_c"),
+    ("temps", "bed_max_c"),
     ("retract", "mm"),
     ("retract", "feed"),
     ("prime", "mm"),
@@ -64,6 +68,8 @@ _NUMERIC_KEYS: tuple[tuple[str, str], ...] = (
     ("magnet_tool_offset", "x"), ("magnet_tool_offset", "y"), ("magnet_tool_offset", "z"),
     ("park", "x"), ("park", "y"), ("park", "safe_z_lift_mm"),
     ("travel", "feed"),
+    ("temps", "nozzle_min_c"), ("temps", "nozzle_max_c"),
+    ("temps", "bed_min_c"), ("temps", "bed_max_c"),
     ("retract", "mm"), ("retract", "feed"), ("prime", "mm"), ("prime", "feed"),
     ("press", "feed"), ("press", "dwell_ms"),
     ("shear", "distance"), ("shear", "feed"),
@@ -87,6 +93,17 @@ def _validate(config: dict) -> None:
     standby = config["temps"]["standby_nozzle_c"]
     if standby is not None and (isinstance(standby, bool) or not isinstance(standby, (int, float))):
         raise ValueError(f"config temps.standby_nozzle_c must be a number or null, got {standby!r}")
+
+    nlo, nhi = config["temps"]["nozzle_min_c"], config["temps"]["nozzle_max_c"]
+    if nlo >= nhi:
+        raise ValueError(
+            f"config temps.nozzle_min_c must be < nozzle_max_c, got {nlo!r} >= {nhi!r}"
+        )
+    blo, bhi = config["temps"]["bed_min_c"], config["temps"]["bed_max_c"]
+    if blo >= bhi:
+        raise ValueError(
+            f"config temps.bed_min_c must be < bed_max_c, got {blo!r} >= {bhi!r}"
+        )
 
     poll = config.get("ui", {}).get("idle_poll_s", 0)
     if isinstance(poll, bool) or not isinstance(poll, (int, float)) or poll < 0:
