@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from magnet_embed.gcode.toolpath import Toolpath
+from magnet_embed.gcode.toolpath import Segment, Toolpath
 from magnet_embed.sequences.geometry import (
     check_envelope,
     compute_targets,
@@ -135,3 +135,48 @@ def test_envelope_without_a_toolpath_only_checks_bed_limits(cfg):
 def test_part_footprint_grows_by_the_margin():
     part = _part(10, 20, 30, 40, top=5.0)
     assert part_footprint(part, 2.0) == (8.0, 18.0, 32.0, 42.0)
+
+
+# --- C30: restrict the collision footprint to already-printed layers -----
+
+def _layered_part(layers):
+    """`layers`: `[(z, x0, y0, x1, y1), ...]`, one box per ascending layer
+    index. Two extruding segments per layer are enough to fix its bbox."""
+    segments = []
+    for idx, (z, x0, y0, x1, y1) in enumerate(layers):
+        n = idx * 2
+        segments.append(Segment((x0, y0, z), (x1, y0, z), True, idx, 1500.0, n + 1))
+        segments.append(Segment((x1, y0, z), (x1, y1, z), True, idx, 1500.0, n + 2))
+    layer_z = [z for z, *_ in layers]
+    xs = [x for _, x0, _, x1, _ in layers for x in (x0, x1)]
+    ys = [y for _, _, y0, _, y1 in layers for y in (y0, y1)]
+    return Toolpath(
+        segments=segments, layer_z=layer_z,
+        bbox_min=(min(xs), min(ys), layer_z[0]),
+        bbox_max=(max(xs), max(ys), layer_z[-1]),
+    )
+
+
+def test_envelope_ignores_a_wider_not_yet_printed_upper_layer(cfg):
+    """C30: the whole-file bbox (layer 1, unprinted, spans X 50..250) would
+    flag this pocket; restricted to what's actually printed at the sentinel
+    (layer 0, X 200..250, nowhere near the nozzle), it's accepted."""
+    part = _layered_part([
+        (5.0, 200.0, 50.0, 250.0, 150.0),   # layer 0 - printed by saved.z=5.0
+        (10.0, 50.0, 50.0, 250.0, 150.0),   # layer 1 - not printed yet, much wider
+    ])
+    # sanity: the old whole-file box does span the nozzle's X - proves the
+    # narrower box is doing the work, not that the part just never collided
+    assert part_footprint(part, 2.0)[0] < 90.0
+    assert check_envelope(MI(), cfg, _saved(z=5.0), part) == []
+
+
+def test_envelope_still_flags_a_collision_in_an_already_printed_layer(cfg):
+    """Unchanged from today: material in the layer that's actually printed
+    still refuses the insert, regardless of what's above it."""
+    part = _layered_part([
+        (5.0, 50.0, 50.0, 150.0, 150.0),    # layer 0 - printed, spans the nozzle's X
+        (10.0, 200.0, 200.0, 300.0, 300.0),  # layer 1 - not printed yet, irrelevant
+    ])
+    bad = check_envelope(MI(), cfg, _saved(z=5.0), part)
+    assert len(bad) == 1 and "printed part" in bad[0]

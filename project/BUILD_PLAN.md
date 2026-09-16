@@ -9,7 +9,7 @@ chunks. Each chunk: build → `pytest` green → stage → commit.
 |--|--|
 | Owner | kl mithunvel |
 | Created | 2026-09-09 |
-| Status | **C1–C8 + Phase 1.6 (C13–C19) + C20 + C21 + C22 + C23 + C24 + C25 (collision guard + Emergency Stop) + C26 (insert-phase live view) + C27 (safe-cancel + off-thread Home/Level Bed/Z-cal) + C28 (Connect/Disconnect toggle) + C29 (opt-in numbered/checksummed streaming + resend buffer) done — 260 tests.** One root `python main.py` (mode by flag, opens maximized), bring-your-own-G-code, toolpath + insert-motion preview, "Plan magnet insert…" dialog (now with an embedded live preview of the insert motion), a two-column panel (jog/temperature/filament on the left, the live-print view + send-G-code + log on the right, both stretching to fill a maximized window) with a mode/port indicator, an embedded live-print view (2D current-layer + isometric 3D shown side by side, with a Global-bed/Local-part crop toggle and tight equal-scale axes — a path that grows as the nozzle passes through it, and tracks the actual insert-motion waypoints instead of freezing during a magnet insert — plus a nozzle marker and current-step G-code text) during a run, and a guided Z-offset calibration dialog. Magnet-flow hardware smoke test still pending the applicator build; the Z-calibration workflow is itself untested on real hardware — see Known Technical Debt. |
+| Status | **C1–C8 + Phase 1.6 (C13–C19) + C20 + C21 + C22 + C23 + C24 + C25 (collision guard + Emergency Stop) + C26 (insert-phase live view) + C27 (safe-cancel + off-thread Home/Level Bed/Z-cal) + C28 (Connect/Disconnect toggle) + C29 (opt-in numbered/checksummed streaming + resend buffer) + C30 (collision guard restricted to already-printed layers) done — 262 tests.** One root `python main.py` (mode by flag, opens maximized), bring-your-own-G-code, toolpath + insert-motion preview, "Plan magnet insert…" dialog (now with an embedded live preview of the insert motion), a two-column panel (jog/temperature/filament on the left, the live-print view + send-G-code + log on the right, both stretching to fill a maximized window) with a mode/port indicator, an embedded live-print view (2D current-layer + isometric 3D shown side by side, with a Global-bed/Local-part crop toggle and tight equal-scale axes — a path that grows as the nozzle passes through it, and tracks the actual insert-motion waypoints instead of freezing during a magnet insert — plus a nozzle marker and current-step G-code text) during a run, and a guided Z-offset calibration dialog. Magnet-flow hardware smoke test still pending the applicator build; the Z-calibration workflow is itself untested on real hardware — see Known Technical Debt. |
 | Overall plan | `project/PROJECT_PLAN.md` |
 | Architecture / rules | `.CLAUDE/CLAUDE.md` |
 
@@ -1261,6 +1261,53 @@ after a bench test.
   Manual: `python main.py --sim --no-gui` with both flags set via a
   throwaway `config.local.yaml` (deleted after) — log showed "re-sending
   M420 S1 after G28 at line 7", run completed normally.
+
+---
+
+## Phase 1.17 — Collision guard: printed-so-far footprint
+
+### C30 — Restrict the part-collision box to already-printed layers  ✅
+
+**Why.** `_part_collisions`' footprint (`part_footprint`) used the whole
+file's bounding box — including layers that hadn't been printed yet when the
+sentinel fires. Since a press/shear can only physically hit plastic that
+already exists, that over-refuses a pocket whenever the part gets wider
+higher up, which is exactly the "concave part gets a conservative refusal"
+gap flagged in the 2026-09-16 review's TODO list. Full per-layer
+concave/polygon occupancy (point-in-polygon against the actual printed
+lines) was explicitly scoped out of this chunk in planning — a bigger
+geometry project with real risk of a subtly-wrong implementation being
+*less* safe than the existing conservative bbox; this chunk does the
+safety-monotonic part of the fix instead.
+
+**Done:**
+- `sequences/geometry.py` — new `_printed_footprint(toolpath, printed_top_z,
+  margin_mm)`: resolves `last_layer = toolpath.layer_for_z(printed_top_z)`,
+  unions the XY extent of every *extruding* segment in
+  `toolpath.segments_in_layer(layer)` for `layer` in `0 .. last_layer`
+  (both already existed on `Toolpath`, unused by the guard until now), grows
+  by `margin_mm`. Falls back to the old whole-file `part_footprint` if no
+  extruding segment is found in range (defensive; shouldn't happen for a
+  real file). `_part_collisions` now calls this instead of `part_footprint`
+  directly; `part_footprint` itself is unchanged and stays exported.
+- **Why this can only get safer, never less safe:** `_printed_footprint`'s
+  box is built from a subset of the segments `part_footprint` uses (layers
+  `0..last_layer` vs. every layer), so `min`/`max` over that subset is
+  always within the whole-file box's range — the new box is always ⊆ the
+  old one. It can only stop flagging XY space that doesn't physically exist
+  as plastic yet; it never stops flagging anything actually printed.
+- Docstrings on `part_footprint`/`_printed_footprint` and the
+  `.CLAUDE/CLAUDE.md` Known Technical Debt entry rewritten to describe the
+  narrower, still-bbox (not polygon) scope precisely.
+- Tests: `test_geometry` +2 — a multi-layer `Toolpath` fixture where layer 1
+  (not yet printed) is far wider than layer 0 (printed): the whole-file box
+  would flag the pocket (asserted directly via `part_footprint` first, to
+  prove the narrower box is doing the work), the real `check_envelope` call
+  now accepts it; a second fixture confirms a collision with material that
+  *is* in the printed layer is still refused, unchanged → **262 tests.**
+  `python main.py --sim --no-gui tests/data/sample.gcode --confirm success`
+  still exits 0 (the C25 fixture's collision-free coupon is a single-layer
+  case, unaffected by the multi-layer refinement).
 
 ---
 

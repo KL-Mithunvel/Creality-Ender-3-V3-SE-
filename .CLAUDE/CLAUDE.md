@@ -65,12 +65,13 @@ involvement is acceptable at this stage.
 > insert-phase live view) + Phase 1.14 (C27: safe-cancel + off-thread
 > Home/Level Bed/Z-cal) + Phase 1.15 (C28: Connect/Disconnect toggle) +
 > Phase 1.16 (C29: opt-in line-numbered/checksummed streaming + resend
-> buffer + `M420 S1` resend-after-`G28`) done, plus mid-print temp control,
+> buffer + `M420 S1` resend-after-`G28`) + Phase 1.17 (C30: collision guard
+> restricted to already-printed layers) done, plus mid-print temp control,
 > a Level Bed button, a run-report summary in the log, in-panel config
 > editing, an embedded live-print view showing 2D and equal-scale bed-aware
 > 3D side by side with a Global-bed/Local-part crop toggle, a guided
 > Z-offset calibration dialog, and a two-column panel that opens maximized
-> and shows what it's actually connected to — 260 tests**
+> and shows what it's actually connected to — 262 tests**
 > (`project/BUILD_PLAN.md`).
 > One root `python main.py` (mode by flag), `gcode/toolpath.py`, shared
 > `sequences/geometry.py`, a matplotlib toolpath + insert-motion preview
@@ -149,7 +150,7 @@ back-compat wrappers that call `entry` with a fixed mode.
 | `magnet_embed/gcode/toolpath.py` | `parse_toolpath(path) -> Toolpath` — a slice as ordered `Segment`s (travel vs extrude, each carrying a 1-based `line_no`), a layer→Z table (slicer markers, else Z-derived), bounding box, distances, rough time. `progress_position(current_line)` / `progress_layer(current_line)` bisect the parsed path to the nozzle position/layer implied by how far `GcodeRunner` has streamed — no extra printer traffic. Feeds the visualisation, the plan dialog, and the panel's live-print view. |
 | `magnet_embed/viz/toolpath_fig.py` | Pure preview helpers (`nozzle_waypoints`, `pole_waypoints`, `sample_polyline`, `state_at_z`, `progressive_path_3d`) + matplotlib `draw_*` functions (layer X–Y, side X–Z, 3D path, phase-coloured insert overlay, `draw_live_layer`/`update_live_marker` for the panel's 2D live view + `draw_live_3d(..., show_bed=)`/`update_live_3d`/`update_live_3d_marker` (C26: moves just the 3D marker, without redrawing the growing path — used when the nozzle position comes from the insert-phase waypoints rather than line progress) for the 3D one — `show_bed=True` spans the real bed with the plate outline, `show_bed=False` crops tight to the part; both use explicit `set_xlim`/`set_ylim`/`set_zlim` + `set_box_aspect` for equal-scale axes with no autoscale-margin surprises, plus a path that grows as the nozzle passes through it). No GUI backend. |
 | `magnet_embed/viz/preview.py` | `PreviewWindow` (Tk `Toplevel`, matplotlib `FigureCanvasTkAgg`) — layer slider, play/scrub the nozzle + pole tip along `plan_insert_moves`, envelope violations flagged, "Open 3D view". `python main.py --preview FILE`. |
-| `magnet_embed/sequences/geometry.py` | `compute_targets` / `plan_insert_moves` / `check_envelope(mi, config, saved, toolpath=None)` / `part_footprint` / `pole_point` — the one place the insert-motion targets are computed **and the one damage guard** (C25): pocket on the bed, nozzle targets inside the machine limits, no press into the build plate, and — with the toolpath — no press/shear that puts the nozzle inside the printed part. `insert_magnet` executes the targets; the preview + plan dialog draw and check the same numbers. |
+| `magnet_embed/sequences/geometry.py` | `compute_targets` / `plan_insert_moves` / `check_envelope(mi, config, saved, toolpath=None)` / `part_footprint` / `pole_point` — the one place the insert-motion targets are computed **and the one damage guard** (C25): pocket on the bed, nozzle targets inside the machine limits, no press into the build plate, and — with the toolpath — no press/shear that puts the nozzle inside the printed part, tested against only the layers already printed at insert time (`_printed_footprint`, C30) rather than the whole file. `insert_magnet` executes the targets; the preview + plan dialog draw and check the same numbers. |
 | `magnet_embed/sequences/insert_magnet.py` | The `SAVE → PARK → DISPENSE → APPROACH → PRESS → SHEAR → LIFT → ASK → RESUME` state machine. Targets come from `geometry.compute_targets`; `toolpath=` (keyword) enables the collision guard — every caller that has the file passes it. `on_phase=` (keyword, C26) fires once per phase with its exact nozzle-tip target (`None` for the two non-motion phases), from the same values the phase actually sends — a live-view caller can't drift from the run. |
 | `magnet_embed/app.py` | `Controller` — headless UI↔worker mediator (threads, queues, prompt blocking); optional `log_dir` writes a per-run transcript. `load_gcode()` caches a parsed `toolpath` + raw `gcode_lines` (best-effort — a parse failure logs and leaves them empty rather than blocking the load); `progress_point`/`current_line_text` derive the live nozzle position + current G-code line from them. `start_z_calibration()`/`nudge_z()`/`save_z_offset()` drive the Z Calibrate dialog (idle-only). `link_summary` → `"simulator"` / `"printer COM3"` / `"... + dispenser COM4"`, from whether the link objects have a `.port` (real) or not (sim). `in_insert` (read-only property, C26) + `_on_insert_phase` wire `insert_magnet`'s `on_phase` into a new `"phase"` event kind so the panel can show live progress during an insert instead of freezing at the sentinel. |
 | `magnet_embed/runlog.py` | `RunLog` — one `logs/<ts>-<name>.log` per streamed job, a timestamped line per event, plus a human-readable `=== SUMMARY ===` block appended on `close()` (duration, lines sent/total, sentinels seen, any errors, final position + temps). `summary_text` is also echoed to the panel log right after a run finishes. |
@@ -337,13 +338,20 @@ hardware attached.
   `toolpath`, `_part_collisions`: the part is printed up to `saved.z` when the
   sentinel fires, so if `press_z < saved.z + collision.nozzle_clearance_mm`
   and the nozzle XY at PRESS or at any of 10 sampled points along SHEAR lies
-  inside `part_footprint` (toolpath bbox grown by
-  `collision.footprint_margin_mm`) → "nozzle would enter the printed part
-  during PRESS/SHEAR …" with the numbers and the fix (pocket within the offset
-  of a part edge, or change the offset). The footprint is the bounding box —
-  deliberately conservative; per-layer occupancy is a later refinement.
-  Without a toolpath only (1)–(3) run. The pole tip touching the pocket is the
-  intended contact and is never flagged.
+  inside `_printed_footprint` (C30 — a bbox grown by `collision.
+  footprint_margin_mm`, but built from only the segments in layers `0 ..
+  layer_for_z(saved.z)` — the layers actually printed at insert time, not
+  the whole file) → "nozzle would enter the printed part during PRESS/SHEAR
+  …" with the numbers and the fix (pocket within the offset of a part edge,
+  or change the offset). `_printed_footprint` is always a subset of the
+  older whole-file `part_footprint` (still exported, now only its
+  fallback for the edge case of no extruding segments in range), so C30 can
+  only *stop* flagging geometry that doesn't physically exist yet — it can't
+  weaken protection for anything actually printed. Still a bounding box
+  (per printed range, not per exact shape) — an L-shaped *printed*
+  cross-section is still its enclosing rectangle; true concave/polygon
+  occupancy is a further TODO. Without a toolpath only (1)–(3) run. The pole
+  tip touching the pocket is the intended contact and is never flagged.
 
 ### `sequences/insert_magnet.py`
 - `insert_magnet(printer: PrinterLink, dispenser: DispenserLink | None, mi: MagnetInsert,
@@ -715,10 +723,14 @@ parks, magnet dispensed, controlled press + lateral shear run, print resumes and
   Ender-3 V3 SE has known OctoPrint friction) and mechanism issues. Treat it as
   debugging, not production.
 - ~~Nozzle-vs-part collision is not checked~~ — **fixed in C25**
-  (`geometry.check_envelope(..., toolpath)`, see Key Modules). Remaining
-  limits of the guard: the part footprint is the toolpath **bounding box**
-  (an L-shaped part is treated as its enclosing rectangle — conservative, may
-  refuse a legal pocket in a concave part); the **applicator body** itself is
+  (`geometry.check_envelope(..., toolpath)`, see Key Modules). ~~The
+  footprint counted layers that haven't been printed yet~~ — **narrowed in
+  C30** (`geometry._printed_footprint`, restricted to layers `0 ..
+  layer_for_z(saved.z)`). Remaining limits of the guard: the footprint is
+  still a **bounding box** of the printed-so-far layers, not the exact
+  shape (an L-shaped *printed* cross-section is treated as its enclosing
+  rectangle — conservative, may still refuse a legal pocket in a concave
+  part); the **applicator body** itself is
   not modelled (only the nozzle tip is tested — measure the add-on's lowest
   point vs. the nozzle and, if it hangs lower, fold that into
   `collision.nozzle_clearance_mm`); `saved.z` is taken as the printed top

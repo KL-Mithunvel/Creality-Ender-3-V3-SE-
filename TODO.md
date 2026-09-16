@@ -20,8 +20,10 @@ criteria, risks). Architecture and rules: `.CLAUDE/CLAUDE.md`. Keep all three in
       the applicator's lowest point vs. the nozzle tip and fold it into
       `collision.nozzle_clearance_mm` if it hangs lower; bench-test EMERGENCY STOP with a
       long move in flight (is `EMERGENCY_PARSER` on in the stock V3 SE firmware?)
-- [ ] Collision guard refinement: per-layer occupancy instead of the whole-part bounding
-      box (a concave part currently gets a conservative refusal)
+- [ ] Collision guard refinement: true per-layer concave/polygon occupancy instead of a
+      bounding box over the printed-so-far layers (C30 narrowed the box to only what's
+      actually printed at insert time, but an L-shaped *printed* cross-section is still
+      treated as its enclosing rectangle)
 - [ ] Animate the Animate window's "Open 3D view" (still static) — the main panel's live view
       already tracks the insert phase (C26, below); the separate Animate popup's 3D view doesn't
 - [ ] Performance / window sprawl (owner-observed "system feels slow"): Plan, Animate, 3D,
@@ -46,6 +48,11 @@ criteria, risks). Architecture and rules: `.CLAUDE/CLAUDE.md`. Keep all three in
 
 ## Done
 
+- [x] **Phase 1.17 — C30** (`project/BUILD_PLAN.md`) — collision guard restricted to
+      already-printed layers: `geometry._printed_footprint` builds the part-collision box
+      from only the segments in layers `0 .. layer_for_z(saved.z)`, not the whole file, so
+      a pocket no longer gets refused over geometry that hasn't been printed yet (still a
+      bounding box, not true concave occupancy — see the remaining TODO item above). 262 tests.
 - [x] **Phase 1.16 — C29** (`project/BUILD_PLAN.md`) — streaming reliability, both opt-in
       and off by default: `gcode.use_line_numbers` makes `GcodeRunner` send
       `N<n> ...*<checksum>` lines and replay a 64-line buffer on a firmware `Resend:`

@@ -110,14 +110,55 @@ def plan_insert_moves(
 
 def part_footprint(toolpath: Toolpath, margin_mm: float) -> tuple[float, float, float, float]:
     """`(x0, y0, x1, y1)` of the printed part's XY extent, grown by `margin_mm`
-    on every side. Uses the toolpath's bounding box - deliberately conservative
-    (an L-shaped part is treated as its enclosing rectangle); a per-layer
-    occupancy test is a later refinement (`TODO.md`)."""
+    on every side. Uses the toolpath's bounding box over *every* layer in the
+    file - deliberately conservative (an L-shaped part is treated as its
+    enclosing rectangle, and geometry that hasn't been printed yet is still
+    counted). `_part_collisions` uses the narrower `_printed_footprint`
+    instead (C30); this whole-file version is kept as its fallback and is
+    still exported for anything that wants the worst-case box."""
     return (
         toolpath.bbox_min[0] - margin_mm,
         toolpath.bbox_min[1] - margin_mm,
         toolpath.bbox_max[0] + margin_mm,
         toolpath.bbox_max[1] + margin_mm,
+    )
+
+
+def _printed_footprint(
+    toolpath: Toolpath, printed_top_z: float, margin_mm: float
+) -> tuple[float, float, float, float]:
+    """`(x0, y0, x1, y1)` of only the layers already printed by `printed_top_z`
+    (C30) - a tighter, still-conservative refinement of `part_footprint`.
+
+    A press/shear can only physically hit plastic that already exists; the
+    whole-file bbox `part_footprint` also counts layers above `printed_top_z`
+    that haven't been printed yet, over-refusing a pocket whenever the part
+    gets wider higher up. This box is built from the same segments as
+    `part_footprint`, restricted to `layer 0 .. layer_for_z(printed_top_z)`
+    inclusive - always a subset of it, so it can only stop flagging geometry
+    that doesn't exist yet; it never stops flagging anything actually
+    printed. Still a bounding box per printed range, not true per-layer
+    concave/polygon occupancy (an L-shaped *printed* cross-section is still
+    treated as its enclosing rectangle) - that stays a further TODO.
+
+    Falls back to the whole-file `part_footprint` if no extruding segment is
+    found in range (shouldn't happen for a real file, but never *less*
+    conservative than today on a surprise input).
+    """
+    last_layer = toolpath.layer_for_z(printed_top_z)
+    xs: list[float] = []
+    ys: list[float] = []
+    for layer in range(0, last_layer + 1):
+        for seg in toolpath.segments_in_layer(layer):
+            if not seg.extruding:
+                continue
+            xs.append(seg.p0[0]); xs.append(seg.p1[0])
+            ys.append(seg.p0[1]); ys.append(seg.p1[1])
+    if not xs:
+        return part_footprint(toolpath, margin_mm)
+    return (
+        min(xs) - margin_mm, min(ys) - margin_mm,
+        max(xs) + margin_mm, max(ys) + margin_mm,
     )
 
 
@@ -153,7 +194,7 @@ def _part_collisions(
     if t.press_z >= printed_top + clearance:
         return []                      # the nozzle never goes low enough to matter
 
-    box = part_footprint(toolpath, margin)
+    box = _printed_footprint(toolpath, printed_top, margin)
     where: list[tuple[str, tuple[float, float]]] = [("PRESS", t.approach_xy)]
     where += [("SHEAR", p) for p in _points_along(t.approach_xy, t.shear_xy, _SHEAR_SAMPLES)[1:]]
     for phase, xy in where:
