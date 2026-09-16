@@ -24,6 +24,17 @@ def test_absolute_move_tracks_position_and_feed(printer):
     assert st.feedrate == 1500.0
 
 
+def test_numbered_checksummed_line_is_interpreted_like_plain(printer):
+    """C29: real Marlin accepts both formats; SimPrinter must too, since
+    `GcodeRunner` sends numbered lines when `gcode.use_line_numbers` is on."""
+    printer.command("N1 G90*32")
+    printer.command("N2 G1 X10 Y20 Z0.4 F1500*88")
+    st = printer.query_state()
+    assert (st.x, st.y, st.z) == (10.0, 20.0, 0.4)
+    assert st.feedrate == 1500.0
+    assert "N1 G90*32" in printer.sent   # the wire text is recorded verbatim
+
+
 def test_relative_move(printer):
     printer.command("G90")
     printer.command("G1 X10 Y10")

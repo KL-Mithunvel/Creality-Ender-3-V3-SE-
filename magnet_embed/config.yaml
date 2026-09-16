@@ -100,3 +100,6 @@ zcal:
 gcode:
   sentinel_token: ";MAGNET_INSERT"
   require_sentinel: false   # if true, a run that reaches EOF with no sentinel errors
+  # Both opt-in and unverified on real hardware (C29) - bench-test before enabling.
+  use_line_numbers: false            # N<n>/checksum + resend buffer instead of plain lines
+  resend_leveling_after_home: false  # re-send M420 S1 right after any streamed G28

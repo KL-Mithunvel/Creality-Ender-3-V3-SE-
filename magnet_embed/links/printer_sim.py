@@ -12,7 +12,7 @@ import time
 from collections import deque
 
 from ..exceptions import AckTimeout, PrinterConnectionError, PrinterError
-from ..gcode.util import parse_words, strip_comment
+from ..gcode.util import parse_words, strip_comment, strip_line_number
 from ..state import PrinterState
 from .base import PrinterLink
 
@@ -53,7 +53,11 @@ class SimPrinter(PrinterLink):
             raise PrinterConnectionError("SimPrinter.send_line() before connect()")
         if self._delay:
             time.sleep(self._delay)
-        code = strip_comment(line).strip()
+        # Real Marlin accepts both plain and N<n>/checksum-wrapped lines, so
+        # strip the wrapper unconditionally before parsing - mirrors what the
+        # real firmware does regardless of whether the host currently has
+        # `gcode.use_line_numbers` on (Dev Rule 2).
+        code = strip_comment(strip_line_number(line)).strip()
         head = code.split()[0].upper() if code else ""
         if self.halted and head != "M999":
             # a real Marlin board answers nothing useful after M112 until it is

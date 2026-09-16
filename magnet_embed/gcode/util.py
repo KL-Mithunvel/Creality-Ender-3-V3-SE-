@@ -28,3 +28,27 @@ def fmt_number(value: float) -> str:
     """Format a float for G-code / a sentinel: 3 dp, trailing zeros trimmed, never empty."""
     text = f"{value:.3f}".rstrip("0").rstrip(".")
     return text if text not in ("", "-", "-0") else "0"
+
+
+_NUMBERED_RE = re.compile(r"^N\d+\s+(.*?)(?:\s*\*\d+)?$")
+
+
+def build_numbered_line(n: int, text: str) -> str:
+    """Marlin checksummed line: `N<n> <text>*<checksum>`, checksum = XOR of the
+    ASCII bytes of `"N<n> <text>"`. Used by `GcodeRunner` when
+    `config.gcode.use_line_numbers` is on, so a `Resend:` can be serviced
+    instead of ending the run."""
+    numbered = f"N{n} {text}"
+    checksum = 0
+    for ch in numbered:
+        checksum ^= ord(ch)
+    return f"{numbered}*{checksum}"
+
+
+def strip_line_number(text: str) -> str:
+    """Undo `build_numbered_line`: `"N5 G1 X10*37"` -> `"G1 X10"`. A line with
+    no `N<n>` prefix passes through unchanged - real Marlin firmware accepts
+    both plain and checksummed lines, and the sim/serial links must too
+    (Dev Rule 2)."""
+    m = _NUMBERED_RE.match(text)
+    return m.group(1) if m else text

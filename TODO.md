@@ -34,8 +34,9 @@ criteria, risks). Architecture and rules: `.CLAUDE/CLAUDE.md`. Keep all three in
 - [ ] Insert-phase polish: a log line per phase (not just the live-view label, C26) and a
       planned-path overlay on the 2D view during an insert (the 2D layer currently just
       freezes and the marker jumps to each phase's waypoint)
-- [ ] Streaming reliability for long real prints: `N` line numbers + checksum + resend buffer;
-      opt-in `M420 S1` re-send after any streamed `G28`
+- [ ] Bench-test C29's opt-in `gcode.use_line_numbers`/`gcode.resend_leveling_after_home`
+      on the real V3 SE before ever enabling them for a real print (checksum/resend format
+      and `M420 S1` behavior are both unverified against the real firmware)
 - [ ] GUI/UX pass (from the 2026-09-16 screenshot review): fill the empty left column, default
       the 3D view to Local + cap Z ticks, phase-colour legend in Plan/Animate, WCAG-contrast
       captions, fix double-wrapped dialog text, larger jog targets + arrow-key jog + tooltips,
@@ -45,6 +46,13 @@ criteria, risks). Architecture and rules: `.CLAUDE/CLAUDE.md`. Keep all three in
 
 ## Done
 
+- [x] **Phase 1.16 — C29** (`project/BUILD_PLAN.md`) — streaming reliability, both opt-in
+      and off by default: `gcode.use_line_numbers` makes `GcodeRunner` send
+      `N<n> ...*<checksum>` lines and replay a 64-line buffer on a firmware `Resend:`
+      instead of aborting the run; `gcode.resend_leveling_after_home` re-sends `M420 S1`
+      after any streamed `G28` (the automated fix for the first-layer-quality root cause
+      noted 2026-09-15). `printer_sim.py`/`printer_serial.py` both accept either wire
+      format. 260 tests.
 - [x] **Phase 1.15 — C28** (`project/BUILD_PLAN.md`) — Connect/Disconnect: `Controller.connect()`
       is idempotent (a no-op while already connected and not `estopped`, so it still clears
       `estopped` after a power-cycle without reopening the port); new `disconnect()`

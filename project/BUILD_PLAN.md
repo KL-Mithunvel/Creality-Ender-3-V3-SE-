@@ -9,7 +9,7 @@ chunks. Each chunk: build → `pytest` green → stage → commit.
 |--|--|
 | Owner | kl mithunvel |
 | Created | 2026-09-09 |
-| Status | **C1–C8 + Phase 1.6 (C13–C19) + C20 + C21 + C22 + C23 + C24 + C25 (collision guard + Emergency Stop) + C26 (insert-phase live view) + C27 (safe-cancel + off-thread Home/Level Bed/Z-cal) + C28 (Connect/Disconnect toggle) done — 254 tests.** One root `python main.py` (mode by flag, opens maximized), bring-your-own-G-code, toolpath + insert-motion preview, "Plan magnet insert…" dialog (now with an embedded live preview of the insert motion), a two-column panel (jog/temperature/filament on the left, the live-print view + send-G-code + log on the right, both stretching to fill a maximized window) with a mode/port indicator, an embedded live-print view (2D current-layer + isometric 3D shown side by side, with a Global-bed/Local-part crop toggle and tight equal-scale axes — a path that grows as the nozzle passes through it, and tracks the actual insert-motion waypoints instead of freezing during a magnet insert — plus a nozzle marker and current-step G-code text) during a run, and a guided Z-offset calibration dialog. Magnet-flow hardware smoke test still pending the applicator build; the Z-calibration workflow is itself untested on real hardware — see Known Technical Debt. |
+| Status | **C1–C8 + Phase 1.6 (C13–C19) + C20 + C21 + C22 + C23 + C24 + C25 (collision guard + Emergency Stop) + C26 (insert-phase live view) + C27 (safe-cancel + off-thread Home/Level Bed/Z-cal) + C28 (Connect/Disconnect toggle) + C29 (opt-in numbered/checksummed streaming + resend buffer) done — 260 tests.** One root `python main.py` (mode by flag, opens maximized), bring-your-own-G-code, toolpath + insert-motion preview, "Plan magnet insert…" dialog (now with an embedded live preview of the insert motion), a two-column panel (jog/temperature/filament on the left, the live-print view + send-G-code + log on the right, both stretching to fill a maximized window) with a mode/port indicator, an embedded live-print view (2D current-layer + isometric 3D shown side by side, with a Global-bed/Local-part crop toggle and tight equal-scale axes — a path that grows as the nozzle passes through it, and tracks the actual insert-motion waypoints instead of freezing during a magnet insert — plus a nozzle marker and current-step G-code text) during a run, and a guided Z-offset calibration dialog. Magnet-flow hardware smoke test still pending the applicator build; the Z-calibration workflow is itself untested on real hardware — see Known Technical Debt. |
 | Overall plan | `project/PROJECT_PLAN.md` |
 | Architecture / rules | `.CLAUDE/CLAUDE.md` |
 
@@ -1209,6 +1209,58 @@ Disconnect at all — both flagged in the 2026-09-16 review's TODO list.
   running) → **254 tests.** Manual: drove the real `ControlPanel` through
   Tk's event loop — the button read "Connect" → "Disconnect" → "Connect" as
   `_toggle_connect` was invoked, `Controller.connected` tracking exactly.
+
+---
+
+## Phase 1.16 — Streaming reliability (opt-in)
+
+### C29 — Line numbers + checksum + resend buffer; opt-in `M420 S1` after `G28`  ✅
+
+**Why.** Plain-line streaming has no way to service a firmware `Resend:` —
+one serial glitch ends a multi-hour print. Separately, the stock V3 SE
+firmware turns bed-mesh compensation off on every `G28` (root-caused
+2026-09-15), and nothing automatically restores it mid-print. Both flagged
+in the 2026-09-16 review's TODO list. **Both stay opt-in, default off** —
+neither the checksum/resend wire format nor `M420 S1`'s effect has been
+verified against the real firmware, so today's bench-tested plain-line
+behavior (2026-09-09) is unchanged unless the owner explicitly turns them on
+after a bench test.
+
+**Done:**
+- `gcode/util.py` — `build_numbered_line(n, text)` (Marlin `N<n> text*<xor
+  checksum>`) and `strip_line_number(text)` (undoes it; passes plain text
+  through unchanged — real Marlin accepts both formats, so the strip is
+  unconditional, not gated on the config flag).
+- `links/printer_sim.py` `SimPrinter.send_line` and `links/printer_serial.py`
+  `SerialPrinter._track_outgoing` both call `strip_line_number` before
+  parsing, so a numbered/checksummed line is interpreted identically to a
+  plain one on either link (Dev Rule 2).
+- `gcode/runner.py` `GcodeRunner` — `config.gcode.use_line_numbers` (opt-in):
+  sends `M110 N0` once before streaming to reset the firmware's counter,
+  then every line via `_send_numbered` → `_send_and_resolve`, which buffers
+  `{n: bare_text}` (`_RESEND_BUFFER = 64`, oldest evicted) and, on
+  `ResendRequested(n)`, replays every buffered line from `n` through the
+  last one sent — recursively, in case the replay itself gets another
+  resend, all under **one** lock acquisition (`self._lock` isn't reentrant,
+  so the recursion reuses the already-held lock rather than re-acquiring
+  it). A resend for a line no longer buffered re-raises, same fatal outcome
+  as plain-line streaming today. `config.gcode.
+  resend_leveling_after_home` (opt-in): after any streamed `G28` sends
+  successfully, immediately also sends `M420 S1` through the same path.
+  With both flags off (today's default), `_transmit` is the exact same
+  `with self._lock: send_line(raw); wait_ok(...)` as before — no behavior
+  change.
+- `config.yaml` — new `gcode.use_line_numbers: false`, `gcode.
+  resend_leveling_after_home: false`.
+- Tests: `test_runner` +6 (numbered end-to-end against `SimPrinter`; a resend
+  replayed from the requested line via a small fake `PrinterLink`
+  (`_ResendOnceLink`); a resend for an evicted line still fatal — 66-line
+  fixture to force eviction past the 64-line buffer; `M420 S1` resent after
+  `G28` when the flag is on, absent when it's off), `test_printer_sim` +1
+  (a numbered/checksummed line parses identically to plain) → **260 tests.**
+  Manual: `python main.py --sim --no-gui` with both flags set via a
+  throwaway `config.local.yaml` (deleted after) — log showed "re-sending
+  M420 S1 after G28 at line 7", run completed normally.
 
 ---
 

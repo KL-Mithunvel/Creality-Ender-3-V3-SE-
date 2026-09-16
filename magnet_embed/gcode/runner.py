@@ -6,6 +6,17 @@ does the park / insert / resume in later chunks).
 
 `run()` is blocking and meant to be driven on a worker thread. `pause()`,
 `resume()`, and `cancel()` are safe to call from another thread.
+
+**Line numbers / checksum / resend (C29, opt-in via `config.gcode.
+use_line_numbers`, default off).** Plain-line streaming (the verified,
+default behavior) has no way to service a `Resend:` — it's fatal. With
+numbering on, every line is sent as `N<n> ...*<checksum>` (see
+`gcode.util.build_numbered_line`) and a small buffer of recently sent lines
+lets a `ResendRequested` be replayed instead of ending the run. Also opt-in
+(`config.gcode.resend_leveling_after_home`): re-send `M420 S1` right after
+any streamed `G28`, since the stock V3 SE firmware turns bed-mesh
+compensation back off on every home (`.CLAUDE/CLAUDE.md` → Known Technical
+Debt). Both are unverified on real hardware — bench-test before enabling.
 """
 
 from __future__ import annotations
@@ -15,11 +26,11 @@ import threading
 from collections.abc import Callable
 from pathlib import Path
 
-from ..exceptions import SentinelNotFound
+from ..exceptions import ResendRequested, SentinelNotFound
 from ..links.base import PrinterLink
 from ..state import MagnetInsert
 from .sentinel import parse_sentinel
-from .util import strip_comment
+from .util import build_numbered_line, strip_comment
 
 log = logging.getLogger(__name__)
 
@@ -28,6 +39,9 @@ OnSentinel = Callable[[MagnetInsert], None]
 #: firmware-pause commands we never forward — the host owns the pause and the
 #: insert sequence does the parking (`.CLAUDE/CLAUDE.md` → Key Conventions).
 _PAUSE_CODES = ("M0", "M1", "M25", "M600", "M601")
+
+#: how many recently sent numbered lines are kept for a resend replay
+_RESEND_BUFFER = 64
 
 
 class GcodeRunner:
@@ -45,6 +59,10 @@ class GcodeRunner:
         self._token = config["gcode"]["sentinel_token"]
         self._require_sentinel = bool(config["gcode"].get("require_sentinel", False))
         self._ack_timeout = config["printer"]["ack_timeout_s"]
+        self._use_numbers = bool(config["gcode"].get("use_line_numbers", False))
+        self._resend_leveling = bool(config["gcode"].get("resend_leveling_after_home", False))
+        self._next_n = 1
+        self._sent_buffer: dict[int, str] = {}
         # Shared with `Controller` so an out-of-band command (currently only
         # `set_temp`) can't interleave its send/`ok` with a streamed line's -
         # both would be reading replies off the same serial connection.
@@ -89,6 +107,12 @@ class GcodeRunner:
         lines = self.path.read_text(encoding="utf-8").splitlines()
         self.total_lines = len(lines)
 
+        if self._use_numbers:
+            with self._lock:
+                self.link.send_line(build_numbered_line(0, "M110 N0"))
+                self.link.wait_ok(self._ack_timeout)
+            self._next_n = 1
+
         for index, raw in enumerate(lines, start=1):
             self.current_line = index
             if self._cancel_evt.is_set():
@@ -123,13 +147,60 @@ class GcodeRunner:
                 )
                 continue
 
-            with self._lock:
-                self.link.send_line(raw)
-                self.link.wait_ok(self._ack_timeout)
+            self._transmit(raw, bare)
             self.sent_lines += 1
+
+            if self._resend_leveling and head == "G28":
+                log.info(
+                    "re-sending M420 S1 after G28 at line %d "
+                    "(config.gcode.resend_leveling_after_home)", index,
+                )
+                self._transmit("M420 S1", "M420 S1")
 
         self.finished = True
         if self._require_sentinel and self.sentinels_seen == 0:
             raise SentinelNotFound(
                 f"reached end of {self.path} without a {self._token} line"
             )
+
+    # --- send (worker thread) -----------------------------------------
+
+    def _transmit(self, raw: str, bare: str) -> None:
+        """Send one line, numbered/checksummed and resend-capable if
+        `config.gcode.use_line_numbers` is on, plain otherwise (today's
+        verified default, unchanged)."""
+        if self._use_numbers:
+            self._send_numbered(bare)
+        else:
+            with self._lock:
+                self.link.send_line(raw)
+                self.link.wait_ok(self._ack_timeout)
+
+    def _send_numbered(self, bare: str) -> None:
+        n = self._next_n
+        self._next_n += 1
+        self._sent_buffer[n] = bare
+        if len(self._sent_buffer) > _RESEND_BUFFER:
+            del self._sent_buffer[min(self._sent_buffer)]
+        with self._lock:
+            self._send_and_resolve(n, build_numbered_line(n, bare))
+
+    def _send_and_resolve(self, n: int, text: str) -> None:
+        """Send `text` (already numbered) and wait for `ok`; on a resend
+        request, replay every buffered line from the requested number through
+        the last one sent, in order, recursively handling any further resend
+        during that replay. Must be called with `self._lock` already held —
+        it is not re-acquired on the recursive path (the lock isn't
+        reentrant). Raises `ResendRequested` unchanged if the firmware wants a
+        line that's no longer in the buffer (unrecoverable, same as the
+        plain-line fatal behavior)."""
+        self.link.send_line(text)
+        try:
+            self.link.wait_ok(self._ack_timeout)
+        except ResendRequested as exc:
+            from_n = int(exc.line_number)
+            for k in range(from_n, self._next_n):
+                bare_k = self._sent_buffer.get(k)
+                if bare_k is None:
+                    raise
+                self._send_and_resolve(k, build_numbered_line(k, bare_k))

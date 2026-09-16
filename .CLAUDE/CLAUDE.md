@@ -63,13 +63,15 @@ involvement is acceptable at this stage.
 > (C21) + Phase 1.9 (C22) + Phase 1.10 (C23) + Phase 1.11 (C24) + Phase 1.12
 > (C25: nozzle-vs-part collision guard + Emergency Stop) + Phase 1.13 (C26:
 > insert-phase live view) + Phase 1.14 (C27: safe-cancel + off-thread
-> Home/Level Bed/Z-cal) + Phase 1.15 (C28: Connect/Disconnect toggle) done,
-> plus mid-print temp control, a Level Bed button, a run-report summary in
-> the log, in-panel config editing, an embedded live-print view showing 2D
-> and equal-scale bed-aware 3D side by side with a Global-bed/Local-part
-> crop toggle, a guided Z-offset calibration dialog, and a two-column panel
-> that opens maximized and shows what it's actually connected to —
-> 254 tests** (`project/BUILD_PLAN.md`).
+> Home/Level Bed/Z-cal) + Phase 1.15 (C28: Connect/Disconnect toggle) +
+> Phase 1.16 (C29: opt-in line-numbered/checksummed streaming + resend
+> buffer + `M420 S1` resend-after-`G28`) done, plus mid-print temp control,
+> a Level Bed button, a run-report summary in the log, in-panel config
+> editing, an embedded live-print view showing 2D and equal-scale bed-aware
+> 3D side by side with a Global-bed/Local-part crop toggle, a guided
+> Z-offset calibration dialog, and a two-column panel that opens maximized
+> and shows what it's actually connected to — 260 tests**
+> (`project/BUILD_PLAN.md`).
 > One root `python main.py` (mode by flag), `gcode/toolpath.py`, shared
 > `sequences/geometry.py`, a matplotlib toolpath + insert-motion preview
 > (`main.py --preview`), a "Plan magnet insert…" dialog that saves
@@ -130,19 +132,19 @@ back-compat wrappers that call `entry` with a fixed mode.
 
 | Path | Role |
 |------|------|
-| `magnet_embed/config.yaml` | All ports, baud, park/safe-Z, temps (incl. `nozzle_min_c`/`nozzle_max_c`/`bed_min_c`/`bed_max_c` guard rails for `set_temp`), the magnet-tool XYZ offset, press/shear distances + feeds, `collision.*` (`nozzle_clearance_mm` the nozzle must keep above the printed top while over the part, `footprint_margin_mm` grown around the part's bbox — the C25 damage guard), `cancel.heaters_off` (C27: whether `Controller.cancel()`'s safe-cancel retreat turns the heaters off), sentinel token, `zcal.*` (Z-offset calibration point/step/feed and the trusted `probe_z_offset`). Nothing hardware-specific is hardcoded elsewhere. |
+| `magnet_embed/config.yaml` | All ports, baud, park/safe-Z, temps (incl. `nozzle_min_c`/`nozzle_max_c`/`bed_min_c`/`bed_max_c` guard rails for `set_temp`), the magnet-tool XYZ offset, press/shear distances + feeds, `collision.*` (`nozzle_clearance_mm` the nozzle must keep above the printed top while over the part, `footprint_margin_mm` grown around the part's bbox — the C25 damage guard), `cancel.heaters_off` (C27: whether `Controller.cancel()`'s safe-cancel retreat turns the heaters off), sentinel token, `gcode.use_line_numbers`/`gcode.resend_leveling_after_home` (C29, both opt-in and unverified on hardware), `zcal.*` (Z-offset calibration point/step/feed and the trusted `probe_z_offset`). Nothing hardware-specific is hardcoded elsewhere. |
 | `main.py` (repo root) | **The** entry point. `--sim` (default) / `--printer` / `--hardware`; `--ping`, `--no-gui` (headless + `--confirm`), `--no-dispenser`, `--config`. All it does is parse args and call `magnet_embed.entry`. |
 | `magnet_embed/entry.py` | Shared wiring: `build_links(mode, config)` → `(printer, dispenser)`; `ping()`; `run_headless()`; `launch_panel()`. One place that constructs links and runs the smoke test. |
 | `magnet_embed/main.py` / `main_printer.py` / `main_sim.py` | Back-compat `python -m …` wrappers — each parses its small CLI and calls `entry` with a fixed mode (`hardware` / `printer` / `sim`). The Uno stays optional in `hardware` mode: a dispenser that fails to connect degrades to printer-only for the session. |
 | `magnet_embed/state.py` | `PrinterState` dataclass (position, temps, connection, run status) + `MagnetInsert` (parsed sentinel fields). |
 | `magnet_embed/links/printer_link.py` | Abstract `PrinterLink` — `connect`, `send_line`, `wait_ok`, `query_state`, `disconnect`. |
 | `magnet_embed/links/_marlin_rx.py` | Classify a received line (`ok`/`wait`/`busy`/`resend`/`error`/`action`/`info`) + parse temps / `M114` position. Pure, unit-tested. |
-| `magnet_embed/links/printer_serial.py` | `SerialPrinter` — real printer over `pyserial`, 115200, `dtr=False` pre-open, `M115` handshake, `ok`-handshake with `busy`/`wait`/`resend`/`error` handling; `query_state()` = `M400`+`M114`. `--ping` CLI. |
-| `magnet_embed/links/printer_sim.py` | Simulated printer — consumes G-code, tracks X/Y/Z/E and temps, emits `ok`, raises the same exceptions as the real link. |
+| `magnet_embed/links/printer_serial.py` | `SerialPrinter` — real printer over `pyserial`, 115200, `dtr=False` pre-open, `M115` handshake, `ok`-handshake with `busy`/`wait`/`resend`/`error` handling; `query_state()` = `M400`+`M114`. `--ping` CLI. `_track_outgoing` strips a numbered-line wrapper (`gcode.util.strip_line_number`, C29) before parsing modal state. |
+| `magnet_embed/links/printer_sim.py` | Simulated printer — consumes G-code, tracks X/Y/Z/E and temps, emits `ok`, raises the same exceptions as the real link. Accepts plain or `N<n> ...*<checksum>` lines (C29) — strips the wrapper before parsing, same as real Marlin. |
 | `magnet_embed/links/dispenser_link.py` | Abstract `DispenserLink` — `ping`, `dispense`, `reset`, `status`. |
 | `magnet_embed/links/dispenser_serial.py` | `SerialDispenser` — newline ASCII to the Arduino Uno; rides the ~2 s auto-reset then PINGs to `PONG`; `DISPENSE`/`RESET`/`STATUS`, `ERR…`→`DispenserError`. `--ping` / `--dispense` CLI. |
 | `magnet_embed/links/dispenser_sim.py` | Simulated dispenser — returns `OK DISPENSE` / `ERR` like the real Uno. |
-| `magnet_embed/gcode/runner.py` | `GcodeRunner` — streams lines, waits for `ok`, detects + parses the sentinel, drops firmware-pause codes (`M0`/`M1`/`M25`/`M600`/`M601`), handles pause / resume / cancel. |
+| `magnet_embed/gcode/runner.py` | `GcodeRunner` — streams lines, waits for `ok`, detects + parses the sentinel, drops firmware-pause codes (`M0`/`M1`/`M25`/`M600`/`M601`), handles pause / resume / cancel. With `config.gcode.use_line_numbers` (C29, opt-in, off by default) sends `N<n> ...*<checksum>` lines and replays a small buffer on a firmware `Resend:` instead of aborting; with `config.gcode.resend_leveling_after_home` (opt-in) re-sends `M420 S1` right after any streamed `G28`. |
 | `magnet_embed/gcode/postprocess.py` | Inserts the `;MAGNET_INSERT X Y Z S<dir>` sentinel comment at a chosen layer / height. |
 | `magnet_embed/gcode/toolpath.py` | `parse_toolpath(path) -> Toolpath` — a slice as ordered `Segment`s (travel vs extrude, each carrying a 1-based `line_no`), a layer→Z table (slicer markers, else Z-derived), bounding box, distances, rough time. `progress_position(current_line)` / `progress_layer(current_line)` bisect the parsed path to the nozzle position/layer implied by how far `GcodeRunner` has streamed — no extra printer traffic. Feeds the visualisation, the plan dialog, and the panel's live-print view. |
 | `magnet_embed/viz/toolpath_fig.py` | Pure preview helpers (`nozzle_waypoints`, `pole_waypoints`, `sample_polyline`, `state_at_z`, `progressive_path_3d`) + matplotlib `draw_*` functions (layer X–Y, side X–Z, 3D path, phase-coloured insert overlay, `draw_live_layer`/`update_live_marker` for the panel's 2D live view + `draw_live_3d(..., show_bed=)`/`update_live_3d`/`update_live_3d_marker` (C26: moves just the 3D marker, without redrawing the growing path — used when the nozzle position comes from the insert-phase waypoints rather than line progress) for the 3D one — `show_bed=True` spans the real bed with the plate outline, `show_bed=False` crops tight to the part; both use explicit `set_xlim`/`set_ylim`/`set_zlim` + `set_box_aspect` for equal-scale axes with no autoscale-margin surprises, plus a path that grows as the nozzle passes through it). No GUI backend. |
@@ -271,8 +273,17 @@ hardware attached.
   sentinel token, parse it into a `MagnetInsert` and call `on_sentinel(mi)` instead of sending it.
   `M0`/`M1`/`M25`/`M600`/`M601` lines are skipped (`pauses_skipped`), never forwarded.
 - `pause()`, `resume()`, `cancel()` — thread-safe.
+- **C29 (opt-in).** `_transmit(raw, bare)` dispatches to plain `send_line`+`wait_ok`
+  (today's default) or, with `config.gcode.use_line_numbers`, `_send_numbered`
+  → `_send_and_resolve` (`N<n> ...*<checksum>`, `gcode.util.build_numbered_line`),
+  which replays a `_RESEND_BUFFER = 64`-line buffer on `ResendRequested`
+  instead of propagating it — recursive, one lock acquisition per top-level
+  call (the lock isn't reentrant). `M110 N0` is sent once before streaming
+  starts to reset the firmware's counter. With `config.gcode.
+  resend_leveling_after_home`, `M420 S1` is re-sent right after any streamed
+  `G28`.
 - Side effects: reads the G-code file, writes to the printer link, appends to the run log.
-- Exceptions: `AckTimeout`, `SentinelNotFound` (if `require_sentinel` and EOF reached first), `SentinelParseError`.
+- Exceptions: `AckTimeout`, `SentinelNotFound` (if `require_sentinel` and EOF reached first), `SentinelParseError`, `ResendRequested` (fatal only if a resend can't be serviced — unrecoverable without numbering, or if the requested line is no longer buffered).
 
 ### `gcode/postprocess.py`
 - `inject_sentinel(in_path, out_path, *, layer: int | None, z_mm: float | None,
@@ -756,9 +767,21 @@ parks, magnet dispensed, controlled press + lateral shear run, print resumes and
   phase (only the live-view label updates) and no planned-path *overlay* drawn
   on the 2D axes during the insert (the 2D layer just freezes and the marker
   jumps to each phase's waypoint) — a nice-to-have, not a correctness gap.
-- **Plain-line streaming has no resend recovery.** No `N` numbers / checksums;
-  a `Resend:` is fatal, so one serial glitch ends a multi-hour print. Planned
-  for real prints: line numbers + checksum + a small resend buffer.
+- ~~Plain-line streaming has no resend recovery~~ — **fixed in C29, opt-in
+  and unverified on hardware.** `config.gcode.use_line_numbers` (default
+  `false`, preserving today's bench-tested plain-line behavior) makes
+  `GcodeRunner` send `N<n> ...*<checksum>` lines and replay a small buffer
+  (`_RESEND_BUFFER = 64`) of recently sent lines on a `Resend:` instead of
+  ending the run; a resend for a line the buffer no longer holds is still
+  fatal, same as before. `printer_sim.py`/`printer_serial.py` both strip the
+  wrapper before parsing (`gcode.util.strip_line_number`) so either format
+  works regardless of the flag. Also opt-in: `config.gcode.
+  resend_leveling_after_home` re-sends `M420 S1` right after any streamed
+  `G28` (see the first-layer-quality debt item above — this is the automated
+  fix that item flagged as "not built"). **Bench-test both flags before
+  enabling them for a real print** — nothing about the real V3 SE firmware's
+  checksum/resend behavior has been verified, same caveat as Z-cal and
+  `EMERGENCY_PARSER`.
 - **Tool offset / press depth / shear params in `config.yaml` are guesses.** They must
   be measured on the real machine (`config.local.yaml`) — see `PROJECT_PLAN.md` §8.
 - **`dispenser_fw/` (the Arduino sketch) does not exist yet.** `SerialDispenser`
@@ -789,8 +812,10 @@ parks, magnet dispensed, controlled press + lateral shear run, print resumes and
   **Level Bed…** panel button (`Controller.level_bed`) probes + enables + saves
   a mesh on demand, but that enabled state does **not** survive the print's own
   `G28` unless something re-sends `M420 S1` right after it — either add that
-  line to the slicer's start G-code, or (not built) have `GcodeRunner`
-  auto-resend `M420 S1` after any `G28` it streams.
+  line to the slicer's start G-code, or turn on `config.gcode.
+  resend_leveling_after_home` (**built in C29**, opt-in, unverified on real
+  hardware — see Known Technical Debt above) to have `GcodeRunner` do it
+  automatically.
 - **The "Z Calibrate…" workflow (C21, `ui/zcal_dialog.py` / `Controller.
   start_z_calibration`/`nudge_z`/`save_z_offset`) is entirely unverified on
   real hardware** — built and tested only against `SimPrinter`. Two specific

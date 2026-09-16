@@ -1,9 +1,12 @@
 """Real printer link — G-code streaming to an Ender-3 V3 SE over USB serial.
 
-Plain lines, no N-numbers / checksums (see `project/BUILD_PLAN.md`). Flow control
-is the `ok` handshake: `send_line` then `wait_ok`. `wait_ok` tolerates `wait` and
-resets its deadline on `busy:`; a `Resend:` becomes a fatal `ResendRequested`
-(we don't keep a numbered history).
+Plain lines by default; `GcodeRunner` wraps them in `N<n> ...*<checksum>` when
+`config.gcode.use_line_numbers` is on (opt-in, unverified on real hardware —
+see `project/BUILD_PLAN.md` C29). Flow control is the `ok` handshake:
+`send_line` then `wait_ok`. `wait_ok` tolerates `wait` and resets its deadline
+on `busy:`; a `Resend:` becomes `ResendRequested`, serviced by `GcodeRunner`'s
+resend buffer when numbering is on, fatal otherwise (no numbered history to
+replay from).
 
 Position/temps are learned from `M114` / temperature reports (`query_state()`
 issues `M400` + `M114`). Coordinate/extruder modes and feedrate are tracked from
@@ -25,6 +28,7 @@ from ..exceptions import (
     PrinterError,
     ResendRequested,
 )
+from ..gcode.util import strip_line_number
 from ..state import PrinterState
 from ._marlin_rx import classify, parse_position, parse_temps
 from .base import PrinterLink
@@ -129,7 +133,7 @@ class SerialPrinter(PrinterLink):
     # --- internals -----------------------------------------------
 
     def _track_outgoing(self, text: str) -> None:
-        upper = text.upper()
+        upper = strip_line_number(text).upper()
         head = upper.split(maxsplit=1)[0] if upper else ""
         if head == "G90":
             self.state.absolute_xyz = True
