@@ -62,6 +62,21 @@ def test_abort_prompt_emits_error(config):
     assert _wait(lambda: not ctl.running)
 
 
+def test_insert_emits_phase_events_in_order(config):
+    """C26: `_on_sentinel` wires `insert_magnet`'s `on_phase` into the events
+    queue so the panel can drive a live view during the insert (see
+    `ui/panel.py._sync_live_view`), instead of freezing at the sentinel line."""
+    ctl = _ctl(config)
+    ctl.load_gcode(SAMPLE)
+    ctl.start_run()
+    seen = _pump_until(ctl, "done", answer="success")
+    phases = [p["phase"] for k, p in seen if k == "phase"]
+    assert phases == [
+        "PARK", "DISPENSE", "APPROACH", "PRESS", "SHEAR", "LIFT", "CONFIRM", "RESUME",
+    ]
+    assert ctl.in_insert is False
+
+
 def test_jog_when_idle_moves_the_printer(config):
     ctl = _ctl(config)
     ctl.jog("X", 5.0)

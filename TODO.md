@@ -22,10 +22,8 @@ criteria, risks). Architecture and rules: `.CLAUDE/CLAUDE.md`. Keep all three in
       long move in flight (is `EMERGENCY_PARSER` on in the stock V3 SE firmware?)
 - [ ] Collision guard refinement: per-layer occupancy instead of the whole-part bounding
       box (a concave part currently gets a conservative refusal)
-- [ ] 3D live view does not move during the magnet-insert phase (owner-observed): position
-      is derived from G-code line progress, which freezes at the sentinel. Drive the 3D and
-      2D markers from the planned insert waypoints (`plan_insert_moves`) while `_in_insert`,
-      via the `on_phase` callback; also animate the Animate window's "Open 3D view" (static today)
+- [ ] Animate the Animate window's "Open 3D view" (still static) — the main panel's live view
+      already tracks the insert phase (C26, below); the separate Animate popup's 3D view doesn't
 - [ ] Performance / window sprawl (owner-observed "system feels slow"): Plan, Animate, 3D,
       Settings, Z-cal each open a separate Toplevel with its own matplotlib canvas, and the
       Animate window redraws every 40 ms while open; the main panel redraws two canvases
@@ -48,6 +46,11 @@ criteria, risks). Architecture and rules: `.CLAUDE/CLAUDE.md`. Keep all three in
 
 ## Done
 
+- [x] **Phase 1.13 — C26** (`project/BUILD_PLAN.md`) — insert-phase live view:
+      `insert_magnet(..., on_phase=)` fires once per phase with its exact nozzle-tip
+      target; `Controller.in_insert`/`_on_insert_phase` feed a new `"phase"` event;
+      the panel's live view tracks it instead of freezing at the sentinel line during
+      a magnet insert. 248 tests.
 - [x] **Phase 1.12 — C25** (`project/BUILD_PLAN.md`) — 🔴 damage guard: `geometry.check_envelope`
       now refuses, with the reason, a pocket off the bed, a nozzle target out of range, a
       press into the build plate, and — using the toolpath — a press/shear that would drive

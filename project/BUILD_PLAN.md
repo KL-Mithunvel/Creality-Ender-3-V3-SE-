@@ -9,7 +9,7 @@ chunks. Each chunk: build → `pytest` green → stage → commit.
 |--|--|
 | Owner | kl mithunvel |
 | Created | 2026-09-09 |
-| Status | **C1–C8 + Phase 1.6 (C13–C19) + C20 + C21 + C22 + C23 + C24 + C25 (collision guard + Emergency Stop) done — 245 tests.** One root `python main.py` (mode by flag, opens maximized), bring-your-own-G-code, toolpath + insert-motion preview, "Plan magnet insert…" dialog (now with an embedded live preview of the insert motion), a two-column panel (jog/temperature/filament on the left, the live-print view + send-G-code + log on the right, both stretching to fill a maximized window) with a mode/port indicator, an embedded live-print view (2D current-layer + isometric 3D shown side by side, with a Global-bed/Local-part crop toggle and tight equal-scale axes — a path that grows as the nozzle passes through it — plus a nozzle marker and current-step G-code text) during a run, and a guided Z-offset calibration dialog. Magnet-flow hardware smoke test still pending the applicator build; the Z-calibration workflow is itself untested on real hardware — see Known Technical Debt. |
+| Status | **C1–C8 + Phase 1.6 (C13–C19) + C20 + C21 + C22 + C23 + C24 + C25 (collision guard + Emergency Stop) + C26 (insert-phase live view) done — 248 tests.** One root `python main.py` (mode by flag, opens maximized), bring-your-own-G-code, toolpath + insert-motion preview, "Plan magnet insert…" dialog (now with an embedded live preview of the insert motion), a two-column panel (jog/temperature/filament on the left, the live-print view + send-G-code + log on the right, both stretching to fill a maximized window) with a mode/port indicator, an embedded live-print view (2D current-layer + isometric 3D shown side by side, with a Global-bed/Local-part crop toggle and tight equal-scale axes — a path that grows as the nozzle passes through it, and tracks the actual insert-motion waypoints instead of freezing during a magnet insert — plus a nozzle marker and current-step G-code text) during a run, and a guided Z-offset calibration dialog. Magnet-flow hardware smoke test still pending the applicator build; the Z-calibration workflow is itself untested on real hardware — see Known Technical Debt. |
 | Overall plan | `project/PROJECT_PLAN.md` |
 | Architecture / rules | `.CLAUDE/CLAUDE.md` |
 
@@ -1074,6 +1074,50 @@ and the review flagged that there was no emergency stop at all.
 
 **Not in C25 (still TODO):** safe-cancel routine; live view during the insert
 phase; window/performance consolidation; UX pass.
+
+---
+
+## Phase 1.13 — Insert-phase live view
+
+### C26 — `on_phase` callback drives the live view during a magnet insert  ✅
+
+**Why.** The panel's live-print view derives nozzle position from G-code line
+progress against the parsed toolpath, which freezes at the sentinel line for
+the whole magnet-insert sequence — the owner flagged this in the 2026-09-16
+review as one of three follow-ups after C25.
+
+**Done:**
+- `sequences/insert_magnet.py` — new keyword-only `on_phase: Callable[[str,
+  Point | None], None] | None = None`. Fires once per phase (`PARK`,
+  `DISPENSE`, `APPROACH`, `PRESS`, `SHEAR`, `LIFT`, `CONFIRM`, `RESUME`),
+  right before that phase's `_send(...)` block, with the exact
+  `targets`/`saved`/`park` values already computed for it (`None` for the two
+  non-motion phases, `DISPENSE`/`CONFIRM`) — so the callback can't report
+  anything other than what's actually about to be sent. Re-fires every retry
+  loop iteration (`PARK` stays a one-off, before the loop).
+- `app.Controller` — new `in_insert` read-only property; `_on_sentinel` wires
+  `on_phase=self._on_insert_phase` into `insert_magnet(...)`, which emits a
+  new `"phase"` event kind (`{"phase": ..., "position": ...}`) onto the
+  existing events queue — no new thread-safety surface.
+- `viz/toolpath_fig.py` — factored the marker-move half of `update_live_3d`
+  out into `update_live_3d_marker(artists, point)` so the panel can move just
+  the 3D marker to an arbitrary point without touching the growing path.
+- `ui/panel.py` `_sync_live_view` — while `Controller.in_insert` and a phase
+  has arrived, feeds the phase's position into the same
+  `update_live_marker`/`update_live_3d_marker` calls (not new drawing code)
+  and shows the phase name as the "current step" label; the 2D layer and 3D
+  path stay frozen at whatever they were at the sentinel rather than being
+  recomputed from line progress. Resets back to line-progress-driven the
+  moment `in_insert` goes false, with no dependency on a specific
+  end-of-insert event.
+- Tests: `test_insert_magnet` +2 (phase order/positions match
+  `compute_targets`; retry repeats `DISPENSE`/`CONFIRM` but not `PARK`),
+  `test_app` +1 (`"phase"` events appear in order during a real sim run) →
+  **248 tests.** Manual: drove the real `ControlPanel` + `Controller` +
+  `SimPrinter`/`SimDispenser` through Tk's own event loop (`root.update()`,
+  no screenshot) across a sentinel-triggered insert — the "current step"
+  label tracked PARK → DISPENSE → APPROACH → PRESS → CONFIRM with no
+  exceptions from either the 2D or 3D draw path.
 
 ---
 

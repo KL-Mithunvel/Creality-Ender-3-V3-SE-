@@ -61,13 +61,13 @@ involvement is acceptable at this stage.
 
 > Build status: **C1–C8 + Phase 1.6 (C13–C19) + Phase 1.7 (C20) + Phase 1.8
 > (C21) + Phase 1.9 (C22) + Phase 1.10 (C23) + Phase 1.11 (C24) + Phase 1.12
-> (C25: nozzle-vs-part collision guard + Emergency Stop — 245 tests) done, plus
-> mid-print temp control, a Level Bed button, a run-report summary in the
-> log, in-panel config editing, an embedded live-print view showing 2D and
-> equal-scale bed-aware 3D side by side with a Global-bed/Local-part crop
-> toggle, a guided Z-offset calibration dialog, and a two-column panel that
-> opens maximized and shows what it's actually connected to — 225 tests**
-> (`project/BUILD_PLAN.md`).
+> (C25: nozzle-vs-part collision guard + Emergency Stop) + Phase 1.13 (C26:
+> insert-phase live view) done, plus mid-print temp control, a Level Bed
+> button, a run-report summary in the log, in-panel config editing, an
+> embedded live-print view showing 2D and equal-scale bed-aware 3D side by
+> side with a Global-bed/Local-part crop toggle, a guided Z-offset
+> calibration dialog, and a two-column panel that opens maximized and shows
+> what it's actually connected to — 248 tests** (`project/BUILD_PLAN.md`).
 > One root `python main.py` (mode by flag), `gcode/toolpath.py`, shared
 > `sequences/geometry.py`, a matplotlib toolpath + insert-motion preview
 > (`main.py --preview`), a "Plan magnet insert…" dialog that saves
@@ -143,13 +143,13 @@ back-compat wrappers that call `entry` with a fixed mode.
 | `magnet_embed/gcode/runner.py` | `GcodeRunner` — streams lines, waits for `ok`, detects + parses the sentinel, drops firmware-pause codes (`M0`/`M1`/`M25`/`M600`/`M601`), handles pause / resume / cancel. |
 | `magnet_embed/gcode/postprocess.py` | Inserts the `;MAGNET_INSERT X Y Z S<dir>` sentinel comment at a chosen layer / height. |
 | `magnet_embed/gcode/toolpath.py` | `parse_toolpath(path) -> Toolpath` — a slice as ordered `Segment`s (travel vs extrude, each carrying a 1-based `line_no`), a layer→Z table (slicer markers, else Z-derived), bounding box, distances, rough time. `progress_position(current_line)` / `progress_layer(current_line)` bisect the parsed path to the nozzle position/layer implied by how far `GcodeRunner` has streamed — no extra printer traffic. Feeds the visualisation, the plan dialog, and the panel's live-print view. |
-| `magnet_embed/viz/toolpath_fig.py` | Pure preview helpers (`nozzle_waypoints`, `pole_waypoints`, `sample_polyline`, `state_at_z`, `progressive_path_3d`) + matplotlib `draw_*` functions (layer X–Y, side X–Z, 3D path, phase-coloured insert overlay, `draw_live_layer`/`update_live_marker` for the panel's 2D live view + `draw_live_3d(..., show_bed=)`/`update_live_3d` for the 3D one — `show_bed=True` spans the real bed with the plate outline, `show_bed=False` crops tight to the part; both use explicit `set_xlim`/`set_ylim`/`set_zlim` + `set_box_aspect` for equal-scale axes with no autoscale-margin surprises, plus a path that grows as the nozzle passes through it). No GUI backend. |
+| `magnet_embed/viz/toolpath_fig.py` | Pure preview helpers (`nozzle_waypoints`, `pole_waypoints`, `sample_polyline`, `state_at_z`, `progressive_path_3d`) + matplotlib `draw_*` functions (layer X–Y, side X–Z, 3D path, phase-coloured insert overlay, `draw_live_layer`/`update_live_marker` for the panel's 2D live view + `draw_live_3d(..., show_bed=)`/`update_live_3d`/`update_live_3d_marker` (C26: moves just the 3D marker, without redrawing the growing path — used when the nozzle position comes from the insert-phase waypoints rather than line progress) for the 3D one — `show_bed=True` spans the real bed with the plate outline, `show_bed=False` crops tight to the part; both use explicit `set_xlim`/`set_ylim`/`set_zlim` + `set_box_aspect` for equal-scale axes with no autoscale-margin surprises, plus a path that grows as the nozzle passes through it). No GUI backend. |
 | `magnet_embed/viz/preview.py` | `PreviewWindow` (Tk `Toplevel`, matplotlib `FigureCanvasTkAgg`) — layer slider, play/scrub the nozzle + pole tip along `plan_insert_moves`, envelope violations flagged, "Open 3D view". `python main.py --preview FILE`. |
 | `magnet_embed/sequences/geometry.py` | `compute_targets` / `plan_insert_moves` / `check_envelope(mi, config, saved, toolpath=None)` / `part_footprint` / `pole_point` — the one place the insert-motion targets are computed **and the one damage guard** (C25): pocket on the bed, nozzle targets inside the machine limits, no press into the build plate, and — with the toolpath — no press/shear that puts the nozzle inside the printed part. `insert_magnet` executes the targets; the preview + plan dialog draw and check the same numbers. |
-| `magnet_embed/sequences/insert_magnet.py` | The `SAVE → PARK → DISPENSE → APPROACH → PRESS → SHEAR → LIFT → ASK → RESUME` state machine. Targets come from `geometry.compute_targets`; `toolpath=` (keyword) enables the collision guard — every caller that has the file passes it. |
-| `magnet_embed/app.py` | `Controller` — headless UI↔worker mediator (threads, queues, prompt blocking); optional `log_dir` writes a per-run transcript. `load_gcode()` caches a parsed `toolpath` + raw `gcode_lines` (best-effort — a parse failure logs and leaves them empty rather than blocking the load); `progress_point`/`current_line_text` derive the live nozzle position + current G-code line from them. `start_z_calibration()`/`nudge_z()`/`save_z_offset()` drive the Z Calibrate dialog (idle-only). `link_summary` → `"simulator"` / `"printer COM3"` / `"... + dispenser COM4"`, from whether the link objects have a `.port` (real) or not (sim). |
+| `magnet_embed/sequences/insert_magnet.py` | The `SAVE → PARK → DISPENSE → APPROACH → PRESS → SHEAR → LIFT → ASK → RESUME` state machine. Targets come from `geometry.compute_targets`; `toolpath=` (keyword) enables the collision guard — every caller that has the file passes it. `on_phase=` (keyword, C26) fires once per phase with its exact nozzle-tip target (`None` for the two non-motion phases), from the same values the phase actually sends — a live-view caller can't drift from the run. |
+| `magnet_embed/app.py` | `Controller` — headless UI↔worker mediator (threads, queues, prompt blocking); optional `log_dir` writes a per-run transcript. `load_gcode()` caches a parsed `toolpath` + raw `gcode_lines` (best-effort — a parse failure logs and leaves them empty rather than blocking the load); `progress_point`/`current_line_text` derive the live nozzle position + current G-code line from them. `start_z_calibration()`/`nudge_z()`/`save_z_offset()` drive the Z Calibrate dialog (idle-only). `link_summary` → `"simulator"` / `"printer COM3"` / `"... + dispenser COM4"`, from whether the link objects have a `.port` (real) or not (sim). `in_insert` (read-only property, C26) + `_on_insert_phase` wire `insert_magnet`'s `on_phase` into a new `"phase"` event kind so the panel can show live progress during an insert instead of freezing at the sentinel. |
 | `magnet_embed/runlog.py` | `RunLog` — one `logs/<ts>-<name>.log` per streamed job, a timestamped line per event, plus a human-readable `=== SUMMARY ===` block appended on `close()` (duration, lines sent/total, sentinels seen, any errors, final position + temps). `summary_text` is also echoed to the panel log right after a run finishes. |
-| `magnet_embed/ui/panel.py` | Tkinter panel — thin view over `Controller`; a two-column layout (jog/temperature/filament left, live view + send-G-code + log right, right column stretches to fill the window) wrapped in a scrollable canvas as a fallback so nothing clips on a screen too small even maximized; `run_gui()` opens maximized by default; shows a mode/port label (`Controller.link_summary`) next to the connection status; jog/home/Level-Bed/Z-Calibrate + raw G-code entry idle-only, "Plan magnet insert…", "Settings…", and "Z Calibrate…" dialogs, modal Success/Retry/Abort prompt, live log, an embedded live-print view showing the current layer (2D) and an isometric 3D view **side by side** with a "Global bed" / "Local part" crop toggle + nozzle marker + current-step G-code text. |
+| `magnet_embed/ui/panel.py` | Tkinter panel — thin view over `Controller`; a two-column layout (jog/temperature/filament left, live view + send-G-code + log right, right column stretches to fill the window) wrapped in a scrollable canvas as a fallback so nothing clips on a screen too small even maximized; `run_gui()` opens maximized by default; shows a mode/port label (`Controller.link_summary`) next to the connection status; jog/home/Level-Bed/Z-Calibrate + raw G-code entry idle-only, "Plan magnet insert…", "Settings…", and "Z Calibrate…" dialogs, modal Success/Retry/Abort prompt, live log, an embedded live-print view showing the current layer (2D) and an isometric 3D view **side by side** with a "Global bed" / "Local part" crop toggle + nozzle marker + current-step G-code text. During a magnet insert (`Controller.in_insert`, C26) the marker and "current step" label switch to the latest `"phase"` event instead of frozen line progress; the 2D layer and 3D path stay frozen at the sentinel rather than being recomputed. |
 | `magnet_embed/ui/plan_dialog.py` | "Plan magnet insert" dialog + pure helpers — set pocket X/Y, seat Z, shear, target layer/Z; envelope-check; an embedded live preview of the planned insert motion (redraws on every keystroke, even out-of-envelope, so the operator can see why); "Animate…" opens the separate play/scrub popup (C16); **Save `<stem>.magnet.gcode`** and load it. |
 | `magnet_embed/ui/settings_dialog.py` | "Settings" dialog — edit `printer.port`/`dispenser.port`/`magnet_tool_offset` from the panel, writes `config.local.yaml`. |
 | `magnet_embed/ui/zcal_dialog.py` | "Z Calibrate…" dialog — guided paper-test Z-offset workflow: home + travel to `zcal.{x,y,start_z}`, fine nudge buttons, Save applies the accumulated nudge to the trusted `config.zcal.probe_z_offset` (`Controller.save_z_offset`), never a value read back from the printer. **Untested on real hardware** — see Known Technical Debt. |
@@ -320,12 +320,19 @@ hardware attached.
 
 ### `sequences/insert_magnet.py`
 - `insert_magnet(printer: PrinterLink, dispenser: DispenserLink | None, mi: MagnetInsert,
-  config: dict, prompt: Callable[[str], str], *, toolpath: Toolpath | None = None) -> None`
+  config: dict, prompt: Callable[[str], str], *, toolpath: Toolpath | None = None,
+  on_phase: Callable[[str, tuple[float, float, float] | None], None] | None = None) -> None`
   — `mi` carries the parsed sentinel fields; `prompt("dispense")` returns
   `"ready" | "abort"` (only used when `dispenser` is `None`), `prompt("confirm")`
   returns `"success" | "retry" | "abort"`; `toolpath` is the parsed file being
   printed (`Controller` passes its cached one, `entry.run_headless` parses it
   best-effort) and enables the nozzle-vs-part collision guard.
+- `on_phase` (C26), if given, is called once per phase — `PARK`, `DISPENSE`,
+  `APPROACH`, `PRESS`, `SHEAR`, `LIFT`, `CONFIRM`, `RESUME` — right before that
+  phase's motion is sent, with the exact nozzle-tip target it's about to move
+  to (`None` for the two non-motion phases). Re-fires every retry loop
+  iteration except `PARK`, which only runs once. Lets `Controller` drive the
+  panel's live view during the insert instead of it freezing at the sentinel.
 - Targets from `geometry.compute_targets`; damage guard from
   `geometry.check_envelope(..., toolpath)` (raises `OutOfEnvelopeError` if
   non-empty — before any line is sent). Runs the state machine in
@@ -384,9 +391,14 @@ hardware attached.
   `toolpath` (`None` if no toolpath), `current_line_text` → the raw source line at
   that progress (`""` if none), `toolpath`/`gcode_lines` (cached by `load_gcode()`,
   best-effort), `link_summary` → `"simulator"` / `"printer COM3"` / `"printer
-  COM3 + dispenser COM4"` (whether `printer`/`dispenser` have a real `.port`).
+  COM3 + dispenser COM4"` (whether `printer`/`dispenser` have a real `.port`),
+  `in_insert` (C26) → whether `insert_magnet` currently owns the printer.
+- `_on_insert_phase(phase, position)` (C26) — the `on_phase` callback passed
+  into `insert_magnet`; emits a `"phase"` event (`{"phase": ..., "position":
+  ...}`) so the panel's live view can track the actual insert motion instead
+  of the frozen line-progress position.
 - Event kinds: `log`, `state` (a `PrinterState`), `prompt` (`"dispense"`/`"confirm"`),
-  `done`, `error`.
+  `done`, `error`, `phase` (`{"phase": str, "position": (x,y,z) | None}`, C26).
 
 ### `ui/panel.py` — `ControlPanel` + `run_gui(controller)`
 - Thin Tkinter view over a `Controller`. Connect, load G-code, run/pause/resume/cancel,
@@ -456,6 +468,14 @@ hardware attached.
   no marker/path) once a file loads; tracks line progress once a run starts
   and freezes at the final position when it ends. No extra printer traffic —
   position comes from `Toolpath.progress_position`, not a polled `M114`.
+- **Insert-phase override (C26).** While `controller.in_insert` and a
+  `"phase"` event has arrived, the 2D marker (`tf.update_live_marker`) and 3D
+  marker (`tf.update_live_3d_marker`, marker-only, doesn't touch the growing
+  path) move to that phase's waypoint instead of `progress_position`, the 2D
+  layer and 3D path stay frozen at the sentinel, and the "current step" label
+  reads `"magnet insert in progress - phase: <PHASE>"`. Reverts to
+  line-progress-driven the moment `in_insert` goes false — no dependency on a
+  specific completion event.
 - **"Z Calibrate…"** (`ui/zcal_dialog.ZCalDialog`, C21) — opens next to "Level
   Bed…"; idle-only. See its own module-table row and Known Technical Debt for
   the config-is-the-trusted-offset design and the real-hardware caveat. Both
@@ -672,10 +692,12 @@ parks, magnet dispensed, controlled press + lateral shear run, print resumes and
 - **`Controller.connect` is not idempotent and there is no Disconnect.** A
   second Connect click on a real link reopens an open port; the exception
   escapes the Tk callback and nothing shows in the panel.
-- **The insert sequence is invisible while it runs.** `insert_magnet` has no
-  phase callback; the live view freezes at the sentinel line (position is
-  derived from line progress). Planned: `on_phase` callback → log line + panel
-  phase badge + planned-path overlay on the 2D view during `_in_insert`.
+- ~~The insert sequence is invisible while it runs~~ — **fixed in C26**
+  (`insert_magnet(..., on_phase=)`, `Controller.in_insert`/`_on_insert_phase`,
+  `ui/panel.py._sync_live_view`, see Key Modules). Still open: no log line per
+  phase (only the live-view label updates) and no planned-path *overlay* drawn
+  on the 2D axes during the insert (the 2D layer just freezes and the marker
+  jumps to each phase's waypoint) — a nice-to-have, not a correctness gap.
 - **Plain-line streaming has no resend recovery.** No `N` numbers / checksums;
   a `Resend:` is fatal, so one serial glitch ends a multi-hour print. Planned
   for real prints: line numbers + checksum + a small resend buffer.

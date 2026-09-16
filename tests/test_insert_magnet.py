@@ -151,3 +151,38 @@ def test_resume_restores_relative_modes(printer, dispenser, cfg):
     st = printer.query_state()
     assert st.absolute_e is False
     assert st.absolute_xyz is False
+
+
+def test_on_phase_reports_the_planned_waypoints_in_order(printer, dispenser, cfg):
+    """C26: on_phase fires once per phase, with the exact target `insert_magnet`
+    is about to send - so a live view built from it can't drift from the run."""
+    calls: list = []
+    insert_magnet(
+        printer, dispenser, MI(), cfg, always("success"),
+        on_phase=lambda phase, pos: calls.append((phase, pos)),
+    )
+    phases = [p for p, _ in calls]
+    assert phases == [
+        "PARK", "DISPENSE", "APPROACH", "PRESS", "SHEAR", "LIFT", "CONFIRM", "RESUME",
+    ]
+    by_phase = dict(calls)
+    assert by_phase["DISPENSE"] is None
+    assert by_phase["CONFIRM"] is None
+    safe_z = 5.0 + cfg["park"]["safe_z_lift_mm"]
+    assert by_phase["PARK"] == (100.0, 100.0, safe_z)
+    assert by_phase["APPROACH"] == (90.0, 100.0, safe_z)        # 110-20, 100-0
+    assert by_phase["PRESS"] == (90.0, 100.0, 4.0)               # seat_z 6 - offset.z 2
+    assert by_phase["SHEAR"] == (95.0, 100.0, 4.0)               # +X by shear.distance 5
+    assert by_phase["RESUME"] == (100.0, 100.0, safe_z)
+
+
+def test_on_phase_repeats_per_retry_but_park_only_once(printer, dispenser, cfg):
+    answers = iter(["retry", "success"])
+    calls: list = []
+    insert_magnet(
+        printer, dispenser, MI(), cfg, lambda stage: next(answers),
+        on_phase=lambda phase, pos: calls.append(phase),
+    )
+    assert calls.count("PARK") == 1
+    assert calls.count("DISPENSE") == 2
+    assert calls.count("CONFIRM") == 2

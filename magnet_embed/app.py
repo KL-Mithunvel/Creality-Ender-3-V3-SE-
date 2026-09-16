@@ -33,7 +33,7 @@ from .runlog import RunLog, new_run_log
 from .sequences.insert_magnet import insert_magnet
 from .state import MagnetInsert
 
-Event = tuple[str, object]  # (kind, payload); kinds: log state prompt done error
+Event = tuple[str, object]  # (kind, payload); kinds: log state prompt done error phase
 
 
 class Controller:
@@ -93,6 +93,12 @@ class Controller:
         """True after `emergency_stop()` sent `M112` - the printer needs a
         reset (`M999` or a power-cycle) and a reconnect before anything else."""
         return self._estopped
+
+    @property
+    def in_insert(self) -> bool:
+        """True while `sequences.insert_magnet` is driving the printer directly
+        for the currently paused magnet insert (see `_in_insert`)."""
+        return self._in_insert
 
     @property
     def link_summary(self) -> str:
@@ -477,11 +483,17 @@ class Controller:
             insert_magnet(
                 self.printer, self.dispenser, mi, self.config, self._prompt,
                 toolpath=self.toolpath,      # enables the nozzle-vs-part collision guard
+                on_phase=self._on_insert_phase,
             )
         finally:
             self._in_insert = False
         self._emit("log", "insert sequence complete")
         self._emit_state()
+
+    def _on_insert_phase(
+        self, phase: str, position: tuple[float, float, float] | None
+    ) -> None:
+        self._emit("phase", {"phase": phase, "position": position})
 
     def _prompt(self, stage: str) -> str:
         self._prompt_pending = True

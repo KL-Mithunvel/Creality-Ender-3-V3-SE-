@@ -256,7 +256,14 @@ def update_live_3d(artists: dict, tp: Toolpath, current_line: int) -> None:
     xs, ys, zs = progressive_path_3d(tp, current_line)
     artists["path"].set_data(np.asarray(xs, dtype=float), np.asarray(ys, dtype=float))
     artists["path"].set_3d_properties(np.asarray(zs, dtype=float))
-    point = tp.progress_position(current_line)
+    update_live_3d_marker(artists, tp.progress_position(current_line))
+
+
+def update_live_3d_marker(artists: dict, point: Point) -> None:
+    """Move only the 3D marker, leaving the printed-so-far path untouched -
+    used when the nozzle position comes from somewhere other than G-code line
+    progress (e.g. the planned insert-motion waypoints while a magnet insert
+    is running and line progress is frozen at the sentinel)."""
     artists["marker"].set_data(np.asarray([point[0]]), np.asarray([point[1]]))
     artists["marker"].set_3d_properties(np.asarray([point[2]]))
 

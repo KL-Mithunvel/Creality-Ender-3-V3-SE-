@@ -59,6 +59,8 @@ class ControlPanel(ttk.Frame):
         self._live_layer = -1
         self._live_art2d: dict = {}
         self._live_art3d: dict = {}
+        self._insert_phase: str | None = None
+        self._insert_position: tuple[float, float, float] | None = None
         self.live3d_global = True  # True = whole bed ("Global"), False = zoomed to the part ("Local")
         self._build_scroll_container()
         self._build()
@@ -373,7 +375,15 @@ class ControlPanel(ttk.Frame):
         toolpath, no extra printer traffic. The 2D layer redraws only when
         the active layer changes; the 3D path grows in place via
         `update_live_3d` rather than a full redraw. Static (no marker/path)
-        before a run starts."""
+        before a run starts.
+
+        While a magnet insert is running (`Controller.in_insert`), line
+        progress is frozen at the sentinel - instead, the marker position and
+        the "current step" label come from the latest `"phase"` event
+        (`Controller._on_insert_phase`, fed by `insert_magnet`'s `on_phase`),
+        and the 2D layer / 3D path stay frozen at whatever they were showing
+        when the insert started, rather than being recomputed from line
+        progress."""
         tp = self.c.toolpath
         if tp is None:
             return
@@ -384,13 +394,22 @@ class ControlPanel(ttk.Frame):
             self._live_art3d = {}
         current_line, total = self.c.progress
 
-        layer = tp.progress_layer(current_line) if total else 0
+        in_insert = self.c.in_insert and self._insert_phase is not None
+        if not self.c.in_insert:
+            self._insert_phase = None
+            self._insert_position = None
+
+        layer = self._live_layer if in_insert else (tp.progress_layer(current_line) if total else 0)
         if layer != self._live_layer:
             self._live_layer = layer
             self._live_art2d = tf.draw_live_layer(self.live2d_ax, tp, layer)
             self.live2d_fig.tight_layout()
-        if total:
-            tf.update_live_marker(self._live_art2d, tp.progress_position(current_line))
+
+        position = self._insert_position if in_insert else (
+            tp.progress_position(current_line) if total else None
+        )
+        if position is not None:
+            tf.update_live_marker(self._live_art2d, position)
         self.live2d_canvas.draw_idle()
 
         if not self._live_art3d:
@@ -400,15 +419,21 @@ class ControlPanel(ttk.Frame):
                 self.live3d_ax, tp, bed_xy, show_bed=self.live3d_global
             )
             self.live3d_fig.tight_layout()
-        if total:
+        if in_insert:
+            if position is not None:
+                tf.update_live_3d_marker(self._live_art3d, position)
+        elif total:
             tf.update_live_3d(self._live_art3d, tp, current_line)
         self.live3d_canvas.draw_idle()
 
-        text = self.c.current_line_text.strip()
-        self.live_line_lbl.configure(
-            text=f"current step (line {current_line}/{total}): {text or '(comment/blank)'}"
-            if total else "current step: not running"
-        )
+        if in_insert:
+            label = f"magnet insert in progress - phase: {self._insert_phase}"
+        elif total:
+            text = self.c.current_line_text.strip()
+            label = f"current step (line {current_line}/{total}): {text or '(comment/blank)'}"
+        else:
+            label = "current step: not running"
+        self.live_line_lbl.configure(text=label)
 
     def log(self, message: str) -> None:
         self.logbox.configure(state="normal")
@@ -427,6 +452,9 @@ class ControlPanel(ttk.Frame):
                 self._show_state(payload)  # type: ignore[arg-type]
             elif kind == "prompt":
                 self._show_prompt(str(payload))
+            elif kind == "phase":
+                self._insert_phase = payload.get("phase")  # type: ignore[union-attr]
+                self._insert_position = payload.get("position")  # type: ignore[union-attr]
             elif kind == "done":
                 self.log(f"run finished: {payload}")
                 total = payload.get("total", 0) if isinstance(payload, dict) else 0

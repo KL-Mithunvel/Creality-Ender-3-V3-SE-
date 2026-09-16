@@ -40,6 +40,14 @@ log = logging.getLogger(__name__)
 #: "confirm" (-> "success"/"retry"/"abort").
 Prompt = Callable[[str], str]
 
+#: `on_phase(phase, position)` - called right before each phase's motion is
+#: sent, with the nozzle-tip target it's about to move to (`None` for a
+#: non-motion phase: DISPENSE, CONFIRM). Lets a UI show live progress during
+#: the insert instead of freezing at the sentinel line (position comes from
+#: the same `targets`/`saved` values the phase actually sends, so it can't
+#: drift from the real run).
+OnPhase = Callable[[str, "tuple[float, float, float] | None"], None]
+
 
 def _send(printer: PrinterLink, *lines: str) -> None:
     for line in lines:
@@ -54,6 +62,7 @@ def insert_magnet(
     prompt: Prompt,
     *,
     toolpath: Toolpath | None = None,
+    on_phase: OnPhase | None = None,
 ) -> None:
     """Park, embed one magnet, and leave the printer ready to resume printing.
 
@@ -62,10 +71,17 @@ def insert_magnet(
     part (`geometry.check_envelope`). Without it only the bed/plate limits are
     checked - callers that have the file should always pass it.
 
+    `on_phase`, if given, is called before each phase's motion (see `OnPhase`)
+    so a caller can drive a live view during the insert.
+
     Raises `OutOfEnvelopeError` (before any move), `SequenceAborted`, or whatever
     the dispenser raises. On any failure the nozzle target is restored so the
     print stays resumable (Development Rule 5).
     """
+    def _phase(name: str, position: "tuple[float, float, float] | None" = None) -> None:
+        if on_phase is not None:
+            on_phase(name, position)
+
     park = config["park"]
     press = config["press"]
     shear = config["shear"]
@@ -92,6 +108,7 @@ def insert_magnet(
 
     try:
         # --- PARK ------------------------------------------------------
+        _phase("PARK", (saved.x, saved.y, safe_z))
         _send(
             printer,
             "M83",
@@ -107,12 +124,14 @@ def insert_magnet(
         retries = 0
         while True:
             # --- DISPENSE --------------------------------------------
+            _phase("DISPENSE")
             if dispenser is not None:
                 dispenser.dispense()
             elif prompt("dispense") != "ready":
                 raise SequenceAborted("operator aborted at the dispense prompt")
 
             # --- APPROACH -------------------------------------------
+            _phase("APPROACH", (carriage_x, carriage_y, safe_z))
             _send(
                 printer,
                 "G90",
@@ -120,6 +139,7 @@ def insert_magnet(
                 "M400",
             )
             # --- PRESS ---------------------------------------------
+            _phase("PRESS", (carriage_x, carriage_y, press_z))
             _send(
                 printer,
                 f"G1 Z{_fmt(press_z)} F{_fmt(press['feed'])}",
@@ -127,12 +147,14 @@ def insert_magnet(
                 "M400",
             )
             # --- SHEAR -------------------------------------------
+            _phase("SHEAR", (shear_x, shear_y, press_z))
             _send(
                 printer,
                 f"G1 X{_fmt(shear_x)} Y{_fmt(shear_y)} F{_fmt(shear['feed'])}",
                 "M400",
             )
             # --- LIFT -----------------------------------------
+            _phase("LIFT", (park['x'], park['y'], safe_z))
             _send(
                 printer,
                 f"G1 Z{_fmt(safe_z)} F{_fmt(travel_feed)}",
@@ -140,6 +162,7 @@ def insert_magnet(
                 "M400",
             )
 
+            _phase("CONFIRM")
             decision = prompt("confirm")
             if decision == "success":
                 break
@@ -153,6 +176,7 @@ def insert_magnet(
                 dispenser.reset()
 
         # --- RESUME --------------------------------------------
+        _phase("RESUME", (saved.x, saved.y, safe_z))
         target = saved.nozzle_target
         _send(printer, f"M104 S{_fmt(target)}")
         if temps.get("reheat_wait", True) and target > 0:
