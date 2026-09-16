@@ -42,9 +42,9 @@ class ZCalDialog(tk.Toplevel):
 
         ttk.Label(
             frm,
-            text="Paper-test Z-offset calibration. Homes, then moves the nozzle\n"
-                 "above the configured bed point. Slide a sheet of paper under\n"
-                 "the nozzle and nudge it down until you feel slight drag, then\n"
+            text="Paper-test Z-offset calibration. Homes, then moves the nozzle "
+                 "above the configured bed point. Slide a sheet of paper under "
+                 "the nozzle and nudge it down until you feel slight drag, then "
                  "Save. Watch the printer the whole time.",
             wraplength=360, foreground="#c23a3a", justify="left",
         ).grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 10))

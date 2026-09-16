@@ -103,6 +103,12 @@ class Controller:
         return self._busy
 
     @property
+    def paused(self) -> bool:
+        """True while the active run is paused (`GcodeRunner.paused`); False
+        if there's no active run at all."""
+        return self.runner is not None and self.runner.paused
+
+    @property
     def connected(self) -> bool:
         return self._connected
 

@@ -9,7 +9,7 @@ chunks. Each chunk: build → `pytest` green → stage → commit.
 |--|--|
 | Owner | kl mithunvel |
 | Created | 2026-09-09 |
-| Status | **C1–C8 + Phase 1.6 (C13–C19) + C20 + C21 + C22 + C23 + C24 + C25 (collision guard + Emergency Stop) + C26 (insert-phase live view) + C27 (safe-cancel + off-thread Home/Level Bed/Z-cal) + C28 (Connect/Disconnect toggle) + C29 (opt-in numbered/checksummed streaming + resend buffer) + C30 (collision guard restricted to already-printed layers) done — 262 tests.** One root `python main.py` (mode by flag, opens maximized), bring-your-own-G-code, toolpath + insert-motion preview, "Plan magnet insert…" dialog (now with an embedded live preview of the insert motion), a two-column panel (jog/temperature/filament on the left, the live-print view + send-G-code + log on the right, both stretching to fill a maximized window) with a mode/port indicator, an embedded live-print view (2D current-layer + isometric 3D shown side by side, with a Global-bed/Local-part crop toggle and tight equal-scale axes — a path that grows as the nozzle passes through it, and tracks the actual insert-motion waypoints instead of freezing during a magnet insert — plus a nozzle marker and current-step G-code text) during a run, and a guided Z-offset calibration dialog. Magnet-flow hardware smoke test still pending the applicator build; the Z-calibration workflow is itself untested on real hardware — see Known Technical Debt. |
+| Status | **C1–C8 + Phase 1.6 (C13–C19) + C20 + C21 + C22 + C23 + C24 + C25 (collision guard + Emergency Stop) + C26 (insert-phase live view) + C27 (safe-cancel + off-thread Home/Level Bed/Z-cal) + C28 (Connect/Disconnect toggle) + C29 (opt-in numbered/checksummed streaming + resend buffer) + C30 (collision guard restricted to already-printed layers) + C31 (GUI performance fixes + UX pass) done — 262 tests.** One root `python main.py` (mode by flag, opens maximized), bring-your-own-G-code, toolpath + insert-motion preview, "Plan magnet insert…" dialog (now with an embedded live preview of the insert motion), a two-column panel (jog/temperature/filament on the left, the live-print view + send-G-code + log on the right, both stretching to fill a maximized window) with a mode/port indicator, an embedded live-print view (2D current-layer + isometric 3D shown side by side, with a Global-bed/Local-part crop toggle and tight equal-scale axes — a path that grows as the nozzle passes through it, and tracks the actual insert-motion waypoints instead of freezing during a magnet insert — plus a nozzle marker and current-step G-code text) during a run, and a guided Z-offset calibration dialog. Magnet-flow hardware smoke test still pending the applicator build; the Z-calibration workflow is itself untested on real hardware — see Known Technical Debt. |
 | Overall plan | `project/PROJECT_PLAN.md` |
 | Architecture / rules | `.CLAUDE/CLAUDE.md` |
 
@@ -1308,6 +1308,81 @@ safety-monotonic part of the fix instead.
   `python main.py --sim --no-gui tests/data/sample.gcode --confirm success`
   still exits 0 (the C25 fixture's collision-free coupon is a single-layer
   case, unaffected by the multi-layer refinement).
+
+---
+
+## Phase 1.18 — GUI performance fixes + UX pass
+
+### C31 — Stop the Animate tick / throttle 3D when not needed; small UX pass  ✅
+
+**Why.** The owner reported "the system feels slow"; the review pinned two
+concrete, measured causes (`viz/preview.py`'s `_tick` rescheduling itself
+unconditionally every 40 ms for as long as the Animate window was open,
+whether playing or not; the main panel's 3D `Axes3D` redrawing on the same
+cadence as the cheap 2D `set_data` update) plus a grab-bag of smaller UX
+items from a 2026-09-16 screenshot review. **The `ttk.Notebook`
+consolidation of Plan/Settings/Z-cal into the main window was explicitly
+descoped** — a large UI rearchitecture with real regression risk and no
+GUI test coverage to catch one, for a problem the two performance fixes
+already address at the root; it stays a TODO item.
+
+**Done (performance):**
+- `viz/preview.py` `PreviewWindow._tick` — now returns without
+  rescheduling itself when `not self.playing`; `_toggle_play` calls
+  `self.after(_TICK_MS, self._tick)` once whenever it flips playback on.
+  Verified with a counting wrapper around `_tick` driven through a real Tk
+  event loop: 0 ticks before Play is ever pressed, ticking while playing,
+  and flat (zero growth) for a full 2 s of idle after pausing (one
+  already-scheduled "straggler" tick fires once right after pausing and
+  correctly declines to reschedule itself — expected, not a leak).
+- `ui/panel.py` — new `ui.live3d_poll_s` config (default `0.3` s, ~2× the
+  2D `live_view_poll_s`); `_live3d_every = max(1, round(live3d_poll_s /
+  live_poll_s))` computed once, `_sync_live_view` now gates the 3D
+  update+`draw_idle()` behind `self._live3d_calls % self._live3d_every ==
+  0` while the 2D marker still updates every call.
+
+**Done (UX pass):**
+- Pause/Resume collapsed into one `self.btn_pause` toggle (`_toggle_pause`,
+  same dispatch-on-property pattern as C28's Connect/Disconnect); new
+  `Controller.paused` property (`self.runner is not None and
+  self.runner.paused`).
+- `"done"` event log line reformatted to
+  `"run finished: {sent}/{total} lines sent, {sentinels} magnet insert(s)"`
+  (was `f"run finished: {payload}"`, a raw dict dump).
+- `self.live3d_global` now defaults to `False` (Local) — the toggle
+  button's initial label updated to match ("Local part"); Global stays one
+  click away.
+- `ui/plan_dialog.py` — seat-Z (`self.sz`) now defaults to
+  `self.tp.layer_z[target_layer]` (the same layer `self.tgt` defaults to,
+  one below the top) instead of `self.tp.top_z`, which was independent of
+  the chosen insert layer and put the default seat above where the insert
+  actually happens whenever the part had layers above the insert point.
+- `ui/settings_dialog.py` / `ui/zcal_dialog.py` — the labels combining
+  embedded `\n` line breaks with a `wraplength` (the "double-wrapped" bug)
+  now use a single un-broken string and let `wraplength` wrap it naturally.
+- Jog buttons: `width=4` → `width=6` plus `ipady=2`/more `pady` for a
+  bigger click target; new `<Left>/<Right>/<Up>/<Down>/<Prior>/<Next>`
+  bindings on the toplevel (`_bind_jog_keys`/`_jog_key`) at the
+  currently-selected step size, ignored while a text-entry widget has
+  focus (so typing in the raw-G-code/temp/filament fields or scrolling the
+  log doesn't get hijacked) or the panel is busy/running.
+
+**Deferred, still in `TODO.md`:** the `ttk.Notebook` consolidation; the
+empty left-column space; capping 3D Z ticks; a phase-colour legend in
+Plan/Animate; a WCAG-contrast pass on the gray captions; jog-button
+tooltips; separate/confirm on other destructive actions; a `ttk.Style`
+font/semantic-colour pass.
+
+- Tests: **262 tests, unchanged** — this chunk only touches the Tkinter
+  classes the project deliberately leaves untested (only pure
+  helpers/dataclasses get automated tests, e.g. `resolve_target_z`).
+  Verified by hand instead, all through Tk's real event loop (no
+  screenshot, matching the C25 introspection-driving method): the Animate
+  tick-stops-when-paused behavior (above); Pause/Resume toggling correctly
+  and `Controller.paused` tracking it through a real sim run; the
+  human-readable "done" line appearing in the actual `ControlPanel` log
+  widget; the 3D toggle button's initial text and `live3d_global` default;
+  a bound arrow key firing with no exception.
 
 ---
 

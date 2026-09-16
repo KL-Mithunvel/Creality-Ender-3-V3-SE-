@@ -57,7 +57,7 @@ class SettingsDialog(tk.Toplevel):
 
         ttk.Label(
             frm,
-            text="Machine-local settings - written to config.local.yaml,\n"
+            text="Machine-local settings - written to config.local.yaml, "
                  "never the committed config.yaml.",
             wraplength=340,
         ).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
@@ -74,7 +74,7 @@ class SettingsDialog(tk.Toplevel):
 
         ttk.Label(
             frm,
-            text="Port changes need an app restart to take effect.\n"
+            text="Port changes need an app restart to take effect. "
                  "Offset changes apply to the very next magnet insert.",
             foreground="gray",
             wraplength=340,

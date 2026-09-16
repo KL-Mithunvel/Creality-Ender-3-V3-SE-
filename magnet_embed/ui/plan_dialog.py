@@ -78,15 +78,20 @@ class PlanInsertDialog(tk.Toplevel):
         self.tp = parse_toolpath(self.in_path)
 
         top_layer = self.tp.layer_count - 1
+        target_layer = max(0, top_layer - 1)
         cx = round(sum(v for v in (self.tp.bbox_min[0], self.tp.bbox_max[0])) / 2, 1)
         cy = round(sum(v for v in (self.tp.bbox_min[1], self.tp.bbox_max[1])) / 2, 1)
 
         self.px = tk.StringVar(value=str(cx))
         self.py = tk.StringVar(value=str(cy))
-        self.sz = tk.StringVar(value=f"{self.tp.top_z:.2f}")
+        # Default seat Z to the target insert layer's own height (C31) - it
+        # previously defaulted to the file's overall top, independent of
+        # `self.tgt` below, which put the seat above where the insert
+        # actually happens whenever the part had layers above the insert point.
+        self.sz = tk.StringVar(value=f"{self.tp.layer_z[target_layer]:.2f}")
         self.shear = tk.StringVar(value=SHEAR_DIRS[0])
         self.mode = tk.StringVar(value="layer")
-        self.tgt = tk.StringVar(value=str(max(0, top_layer - 1)))
+        self.tgt = tk.StringVar(value=str(target_layer))
         self.pause = tk.BooleanVar(value=False)
 
         self._build()

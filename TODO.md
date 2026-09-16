@@ -26,28 +26,40 @@ criteria, risks). Architecture and rules: `.CLAUDE/CLAUDE.md`. Keep all three in
       treated as its enclosing rectangle)
 - [ ] Animate the Animate window's "Open 3D view" (still static) — the main panel's live view
       already tracks the insert phase (C26, below); the separate Animate popup's 3D view doesn't
-- [ ] Performance / window sprawl (owner-observed "system feels slow"): Plan, Animate, 3D,
-      Settings, Z-cal each open a separate Toplevel with its own matplotlib canvas, and the
-      Animate window redraws every 40 ms while open; the main panel redraws two canvases
-      (one full `Axes3D` redraw) every 150 ms during a run. Fold the dialogs into a
-      `ttk.Notebook` in the main window (one figure per tab, created lazily, redraw only
-      when visible), stop the Animate tick when not playing, and profile the 3D
-      `draw_idle` — consider redrawing 3D at a slower rate than 2D or blitting
+- [ ] Window sprawl: Plan, Animate, 3D, Settings, Z-cal each still open a separate Toplevel
+      with its own matplotlib canvas (fold into a `ttk.Notebook` in the main window, one
+      figure per tab, created lazily, redraw only when visible) — descoped from C31 as a
+      larger UI rearchitecture; the two *measured* "system feels slow" contributors (the
+      Animate window's unconditional 40 ms tick, and the main panel's 3D redraw cadence)
+      are fixed (C31: tick stops when not playing; 3D throttled to `ui.live3d_poll_s`,
+      slower than 2D)
 - [ ] Insert-phase polish: a log line per phase (not just the live-view label, C26) and a
       planned-path overlay on the 2D view during an insert (the 2D layer currently just
       freezes and the marker jumps to each phase's waypoint)
 - [ ] Bench-test C29's opt-in `gcode.use_line_numbers`/`gcode.resend_leveling_after_home`
       on the real V3 SE before ever enabling them for a real print (checksum/resend format
       and `M420 S1` behavior are both unverified against the real firmware)
-- [ ] GUI/UX pass (from the 2026-09-16 screenshot review): fill the empty left column, default
-      the 3D view to Local + cap Z ticks, phase-colour legend in Plan/Animate, WCAG-contrast
-      captions, fix double-wrapped dialog text, larger jog targets + arrow-key jog + tooltips,
-      Pause/Resume as one toggle, separate/confirm destructive actions, `ttk.Style` font +
-      semantic status colours, human-readable "run finished" line, Plan dialog seat-Z default
-      below the insert layer
+- [ ] Remaining GUI/UX pass items (from the 2026-09-16 screenshot review, not done in C31):
+      fill the empty left column, cap 3D Z ticks, phase-colour legend in Plan/Animate,
+      WCAG-contrast captions, jog-button tooltips, separate/confirm destructive actions,
+      `ttk.Style` font + semantic status colours
 
 ## Done
 
+- [x] **Phase 1.18 — C31** (`project/BUILD_PLAN.md`) — GUI performance fixes (the Animate
+      window's `_tick` loop now stops rescheduling itself the moment playback ends, instead
+      of ticking every 40 ms for as long as the window is open; the main panel's 3D redraw
+      is throttled to `ui.live3d_poll_s` — slower than the 2D one, since a full `Axes3D`
+      redraw costs more than a `Line2D` `set_data` call) plus a small UX pass: Pause/Resume
+      collapsed into one toggle button (`Controller.paused`), a human-readable "run
+      finished: N/M lines sent, K magnet insert(s)" log line (was a raw dict dump), the 3D
+      view now defaults to Local, the Plan dialog's seat-Z field now defaults to the chosen
+      insert layer's own height (was the file's overall top), double-wrapped dialog text
+      fixed in Settings/Z-cal, bigger jog buttons + arrow-key/Page-Up-Down jog (ignored
+      while a text field has focus or the panel is busy/running). 262 tests (no new
+      automated tests — this chunk only touches the Tkinter classes the project
+      deliberately leaves untested; verified by hand through Tk's real event loop, see
+      `project/BUILD_PLAN.md`).
 - [x] **Phase 1.17 — C30** (`project/BUILD_PLAN.md`) — collision guard restricted to
       already-printed layers: `geometry._printed_footprint` builds the part-collision box
       from only the segments in layers `0 .. layer_for_z(saved.z)`, not the whole file, so

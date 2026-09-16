@@ -95,7 +95,7 @@ the first `--printer` / `--hardware` run on a given machine.
 | `.CLAUDE/CLAUDE.md` | Full project brief — architecture, modules, conventions, rules |
 | `project/HOW_IT_WORKS.md` | Plain-language walkthrough of the whole system (start here if new) |
 | `project/PROJECT_PLAN.md` | Multi-phase plan — goals, steps, files, success criteria, risks, checklist |
-| `project/BUILD_PLAN.md` | Software build broken into commit-sized chunks (C1–C8, Phase 1.6 C13–C19, Phase 1.7 C20, Phase 1.8 C21, Phase 1.9 C22, Phase 1.10 C23, Phase 1.11 C24, Phase 1.12 C25, Phase 1.13 C26, Phase 1.14 C27, Phase 1.15 C28, Phase 1.16 C29, Phase 1.17 C30) + protocol notes |
+| `project/BUILD_PLAN.md` | Software build broken into commit-sized chunks (C1–C8, Phase 1.6 C13–C19, Phase 1.7 C20, Phase 1.8 C21, Phase 1.9 C22, Phase 1.10 C23, Phase 1.11 C24, Phase 1.12 C25, Phase 1.13 C26, Phase 1.14 C27, Phase 1.15 C28, Phase 1.16 C29, Phase 1.17 C30, Phase 1.18 C31) + protocol notes |
 | `project/RESEARCH.md` | Prior art & similar projects survey (OctoPNP, in-situ-placement papers, host-control patterns) + how each informs the design |
 | `docs/INVENTION_DISCLOSURE_DRAFT.md` | Working draft of the patent disclosure form (for inventor + attorney review) |
 | `TODO.md` | Task tracker (mirrors the plan checklists) |
@@ -103,7 +103,7 @@ the first `--printer` / `--hardware` run on a given machine.
 
 ## Status
 
-**Phase 1 + Phase 1.6 through Phase 1.17 software complete (262 tests).**
+**Phase 1 + Phase 1.6 through Phase 1.18 software complete (262 tests).**
 The magnet insert is guarded against damage (C25): the Plan dialog, the
 preview and the run itself refuse — with the reason — a pocket off the bed, a
 press into the build plate, or a press/shear that would drive the nozzle into
@@ -111,7 +111,9 @@ the printed part, and a red **EMERGENCY STOP** (`M112`) is always one click
 away. The live-print view tracks the actual insert-motion waypoints (C26)
 instead of freezing while a magnet insert runs. Cancel now leaves the printer
 safe — retract, lift, park, heaters off (C27) — and Home/Level Bed/Z Calibrate
-run in the background instead of freezing the panel. One `python main.py` (mode by
+run in the background instead of freezing the panel; Connect/Disconnect and
+Pause/Resume are now single toggle buttons (C28/C31), and the 3D view opens
+zoomed to the part by default (C31). One `python main.py` (mode by
 flag) opens **maximized** and drives the whole workflow against a simulated
 printer + dispenser: import a slice → visualise the toolpath → simulate the
 magnet-insert motion → place the sentinel and save `*.magnet.gcode` → stream

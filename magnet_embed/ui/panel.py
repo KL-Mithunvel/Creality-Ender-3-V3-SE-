@@ -55,15 +55,26 @@ class ControlPanel(ttk.Frame):
         self._idle_poll_ticks = round(poll_s * 1000 / _POLL_MS) if poll_s > 0 else 0
         live_poll_s = float(controller.config.get("ui", {}).get("live_view_poll_s", 0) or 0)
         self._live_view_ticks = round(live_poll_s * 1000 / _POLL_MS) if live_poll_s > 0 else 0
+        # 3D redraws a whole Axes3D (expensive) where 2D only moves a Line2D
+        # (cheap) - throttle 3D to a slower cadence than 2D (C31).
+        live3d_poll_s = float(controller.config.get("ui", {}).get("live3d_poll_s", 0) or 0)
+        self._live3d_every = (
+            max(1, round(live3d_poll_s / live_poll_s)) if live_poll_s > 0 and live3d_poll_s > 0 else 1
+        )
+        self._live3d_calls = 0
         self._live_tp = None
         self._live_layer = -1
         self._live_art2d: dict = {}
         self._live_art3d: dict = {}
         self._insert_phase: str | None = None
         self._insert_position: tuple[float, float, float] | None = None
-        self.live3d_global = True  # True = whole bed ("Global"), False = zoomed to the part ("Local")
+        # True = whole bed ("Global"), False = zoomed to the part ("Local").
+        # Defaults to Local (C31) - a short/flat part is otherwise easy to
+        # miss against the full 220 mm bed; Global is one click away.
+        self.live3d_global = False
         self._build_scroll_container()
         self._build()
+        self._bind_jog_keys()
         self.after(_POLL_MS, self._poll)
 
     # --- scrolling shell --------------------------------------------
@@ -142,10 +153,9 @@ class ControlPanel(ttk.Frame):
         run = ttk.Frame(b)
         run.grid(row=row, column=0, columnspan=2, sticky="ew", pady=4)
         self.btn_run = ttk.Button(run, text="Run", command=self.c.start_run)
-        self.btn_pause = ttk.Button(run, text="Pause", command=self.c.pause)
-        self.btn_resume = ttk.Button(run, text="Resume", command=self.c.resume)
+        self.btn_pause = ttk.Button(run, text="Pause", command=self._toggle_pause)
         self.btn_cancel = ttk.Button(run, text="Cancel", command=self.c.cancel)
-        for btn in (self.btn_run, self.btn_pause, self.btn_resume, self.btn_cancel):
+        for btn in (self.btn_run, self.btn_pause, self.btn_cancel):
             btn.pack(side="left", padx=2)
         row += 1
 
@@ -186,9 +196,9 @@ class ControlPanel(ttk.Frame):
                    ("Y+", "Y", 1), ("Z-", "Z", -1), ("Z+", "Z", 1))
         for i, (label, axis, sign) in enumerate(buttons):
             ttk.Button(
-                jog, text=label, width=4,
+                jog, text=label, width=6,
                 command=lambda a=axis, s=sign: self.c.jog(a, s * self.step.get()),
-            ).grid(row=1 + i // 2, column=i % 2, padx=2, pady=1)
+            ).grid(row=1 + i // 2, column=i % 2, padx=3, pady=3, ipady=2)
         ttk.Button(jog, text="Home", command=self.c.home).grid(row=1, column=2, padx=8)
 
         # Two distinct calibrations, captioned so it's clear why both exist:
@@ -269,7 +279,7 @@ class ControlPanel(ttk.Frame):
         live_hdr = ttk.Frame(live)
         live_hdr.grid(row=0, column=0, sticky="ew")
         ttk.Label(live_hdr, text="2D current layer  /  3D:").pack(side="left")
-        self.btn_bed_view = ttk.Button(live_hdr, text="Global bed", width=10, command=self._toggle_bed_view)
+        self.btn_bed_view = ttk.Button(live_hdr, text="Local part", width=10, command=self._toggle_bed_view)
         self.btn_bed_view.pack(side="left", padx=(4, 0))
 
         plots = ttk.Frame(live)
@@ -312,7 +322,39 @@ class ControlPanel(ttk.Frame):
         self.logbox.grid(row=rrow, column=0, sticky="nsew")
         right.rowconfigure(rrow, weight=1)
 
+    # --- jog keys --------------------------------------------------
+
+    #: arrow keys for X/Y, Page Up/Down for Z - same step size the jog
+    #: buttons use (C31). Bound on the toplevel (not just this frame) so they
+    #: work regardless of which internal widget currently has focus.
+    _JOG_KEYS = {
+        "<Left>": ("X", -1), "<Right>": ("X", 1),
+        "<Down>": ("Y", -1), "<Up>": ("Y", 1),
+        "<Next>": ("Z", -1), "<Prior>": ("Z", 1),   # Page Down / Page Up
+    }
+
+    def _bind_jog_keys(self) -> None:
+        toplevel = self.winfo_toplevel()
+        for seq, (axis, sign) in self._JOG_KEYS.items():
+            toplevel.bind(seq, lambda _e, a=axis, s=sign: self._jog_key(a, s))
+
+    def _jog_key(self, axis: str, sign: int) -> None:
+        # Don't hijack arrow/paging keys while the operator is typing or
+        # scrolling a text widget (raw G-code entry, temp/filament fields,
+        # the log) - only jog when nothing text-editable has focus.
+        if isinstance(self.focus_get(), (ttk.Entry, tk.Entry, tk.Text)):
+            return
+        if not self.c.connected or self.c.running or self.c.busy:
+            return
+        self.c.jog(axis, sign * self.step.get())
+
     # --- actions -------------------------------------------------
+
+    def _toggle_pause(self) -> None:
+        if self.c.paused:
+            self.c.resume()
+        else:
+            self.c.pause()
 
     def _toggle_connect(self) -> None:
         if self.c.connected:
@@ -426,12 +468,14 @@ class ControlPanel(ttk.Frame):
                 self.live3d_ax, tp, bed_xy, show_bed=self.live3d_global
             )
             self.live3d_fig.tight_layout()
-        if in_insert:
-            if position is not None:
-                tf.update_live_3d_marker(self._live_art3d, position)
-        elif total:
-            tf.update_live_3d(self._live_art3d, tp, current_line)
-        self.live3d_canvas.draw_idle()
+        self._live3d_calls += 1
+        if self._live3d_calls % self._live3d_every == 0:
+            if in_insert:
+                if position is not None:
+                    tf.update_live_3d_marker(self._live_art3d, position)
+            elif total:
+                tf.update_live_3d(self._live_art3d, tp, current_line)
+            self.live3d_canvas.draw_idle()
 
         if in_insert:
             label = f"magnet insert in progress - phase: {self._insert_phase}"
@@ -463,8 +507,13 @@ class ControlPanel(ttk.Frame):
                 self._insert_phase = payload.get("phase")  # type: ignore[union-attr]
                 self._insert_position = payload.get("position")  # type: ignore[union-attr]
             elif kind == "done":
-                self.log(f"run finished: {payload}")
                 total = payload.get("total", 0) if isinstance(payload, dict) else 0
+                if isinstance(payload, dict):
+                    sent, sentinels = payload.get("sent", 0), payload.get("sentinels", 0)
+                    inserts = f"{sentinels} magnet insert{'s' if sentinels != 1 else ''}"
+                    self.log(f"run finished: {sent}/{total} lines sent, {inserts}")
+                else:
+                    self.log(f"run finished: {payload}")
                 if total:
                     self.progressbar.configure(maximum=total, value=total)
                     self.prog_lbl.configure(text=f"done {total}/{total}")
@@ -515,8 +564,11 @@ class ControlPanel(ttk.Frame):
         self.btn_run.configure(
             state=("disabled" if busy or self.c.gcode_path is None else "normal")
         )
-        for btn in (self.btn_pause, self.btn_resume, self.btn_cancel):
-            btn.configure(state=("normal" if running else "disabled"))
+        self.btn_pause.configure(
+            text="Resume" if self.c.paused else "Pause",
+            state=("normal" if running else "disabled"),
+        )
+        self.btn_cancel.configure(state=("normal" if running else "disabled"))
         idle_state = "disabled" if busy else "normal"
         self.btn_send.configure(state=idle_state)
         self.cmd_entry.configure(state=idle_state)

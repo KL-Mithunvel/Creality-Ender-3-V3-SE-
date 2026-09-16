@@ -80,6 +80,7 @@ cancel:
 ui:
   idle_poll_s: 2.0         # panel auto-refreshes position + temps this often while idle; 0 disables
   live_view_poll_s: 0.15   # panel redraws the embedded live-print view this often during a run; 0 disables
+  live3d_poll_s: 0.3       # 3D redraw cadence (C31) - slower than the 2D one; full Axes3D redraws cost more
 
 # Z-offset ("paper test") calibration - the "Z Calibrate..." panel button.
 # probe_z_offset is the value the APP trusts as the printer's current M851 Z

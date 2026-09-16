@@ -63,7 +63,10 @@ class PreviewWindow(tk.Toplevel):
 
         self._build_controls()
         self._redraw_static()
-        self.after(_TICK_MS, self._tick)
+        # The tick loop (C31) only runs while actually playing - `_toggle_play`
+        # starts it, `_tick` stops rescheduling itself the moment playback
+        # ends, instead of ticking every 40 ms for as long as this window is
+        # open regardless of whether anything is animating.
 
     # --- layout --------------------------------------------------------
 
@@ -146,6 +149,8 @@ class PreviewWindow(tk.Toplevel):
             self.t.set(0.0)
         self.playing = not self.playing
         self.btn_play.configure(text="Pause" if self.playing else "Play")
+        if self.playing:
+            self.after(_TICK_MS, self._tick)
 
     def _on_scrub(self) -> None:
         self.playing = False
@@ -153,14 +158,16 @@ class PreviewWindow(tk.Toplevel):
         self._apply_t()
 
     def _tick(self) -> None:
+        if not self.playing:
+            return                      # stop rescheduling - nothing to animate
+        nt = float(self.t.get()) + _TICK_MS / 1000.0 / _DURATION_S
+        if nt >= 1.0:
+            nt, self.playing = 1.0, False
+            self.btn_play.configure(text="Replay")
+        self.t.set(nt)
+        self._apply_t()
         if self.playing:
-            nt = float(self.t.get()) + _TICK_MS / 1000.0 / _DURATION_S
-            if nt >= 1.0:
-                nt, self.playing = 1.0, False
-                self.btn_play.configure(text="Replay")
-            self.t.set(nt)
-            self._apply_t()
-        self.after(_TICK_MS, self._tick)
+            self.after(_TICK_MS, self._tick)
 
     def _open_3d(self) -> None:
         win = tk.Toplevel(self)

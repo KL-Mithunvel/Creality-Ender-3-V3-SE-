@@ -66,13 +66,17 @@ involvement is acceptable at this stage.
 > Home/Level Bed/Z-cal) + Phase 1.15 (C28: Connect/Disconnect toggle) +
 > Phase 1.16 (C29: opt-in line-numbered/checksummed streaming + resend
 > buffer + `M420 S1` resend-after-`G28`) + Phase 1.17 (C30: collision guard
-> restricted to already-printed layers) done, plus mid-print temp control,
-> a Level Bed button, a run-report summary in the log, in-panel config
-> editing, an embedded live-print view showing 2D and equal-scale bed-aware
-> 3D side by side with a Global-bed/Local-part crop toggle, a guided
-> Z-offset calibration dialog, and a two-column panel that opens maximized
-> and shows what it's actually connected to — 262 tests**
-> (`project/BUILD_PLAN.md`).
+> restricted to already-printed layers) + Phase 1.18 (C31: GUI performance
+> fixes — Animate tick stops when not playing, 3D redraw throttled slower
+> than 2D — plus a UX pass: Pause/Resume as one toggle, human-readable
+> "run finished" line, 3D defaults to Local, Plan dialog seat-Z default
+> tied to the insert layer, fixed double-wrapped dialog text, bigger jog
+> targets + arrow-key jog) done, plus mid-print temp control, a Level Bed
+> button, a run-report summary in the log, in-panel config editing, an
+> embedded live-print view showing 2D and equal-scale bed-aware 3D side by
+> side with a Global-bed/Local-part crop toggle, a guided Z-offset
+> calibration dialog, and a two-column panel that opens maximized and shows
+> what it's actually connected to — 262 tests** (`project/BUILD_PLAN.md`).
 > One root `python main.py` (mode by flag), `gcode/toolpath.py`, shared
 > `sequences/geometry.py`, a matplotlib toolpath + insert-motion preview
 > (`main.py --preview`), a "Plan magnet insert…" dialog that saves
@@ -149,7 +153,7 @@ back-compat wrappers that call `entry` with a fixed mode.
 | `magnet_embed/gcode/postprocess.py` | Inserts the `;MAGNET_INSERT X Y Z S<dir>` sentinel comment at a chosen layer / height. |
 | `magnet_embed/gcode/toolpath.py` | `parse_toolpath(path) -> Toolpath` — a slice as ordered `Segment`s (travel vs extrude, each carrying a 1-based `line_no`), a layer→Z table (slicer markers, else Z-derived), bounding box, distances, rough time. `progress_position(current_line)` / `progress_layer(current_line)` bisect the parsed path to the nozzle position/layer implied by how far `GcodeRunner` has streamed — no extra printer traffic. Feeds the visualisation, the plan dialog, and the panel's live-print view. |
 | `magnet_embed/viz/toolpath_fig.py` | Pure preview helpers (`nozzle_waypoints`, `pole_waypoints`, `sample_polyline`, `state_at_z`, `progressive_path_3d`) + matplotlib `draw_*` functions (layer X–Y, side X–Z, 3D path, phase-coloured insert overlay, `draw_live_layer`/`update_live_marker` for the panel's 2D live view + `draw_live_3d(..., show_bed=)`/`update_live_3d`/`update_live_3d_marker` (C26: moves just the 3D marker, without redrawing the growing path — used when the nozzle position comes from the insert-phase waypoints rather than line progress) for the 3D one — `show_bed=True` spans the real bed with the plate outline, `show_bed=False` crops tight to the part; both use explicit `set_xlim`/`set_ylim`/`set_zlim` + `set_box_aspect` for equal-scale axes with no autoscale-margin surprises, plus a path that grows as the nozzle passes through it). No GUI backend. |
-| `magnet_embed/viz/preview.py` | `PreviewWindow` (Tk `Toplevel`, matplotlib `FigureCanvasTkAgg`) — layer slider, play/scrub the nozzle + pole tip along `plan_insert_moves`, envelope violations flagged, "Open 3D view". `python main.py --preview FILE`. |
+| `magnet_embed/viz/preview.py` | `PreviewWindow` (Tk `Toplevel`, matplotlib `FigureCanvasTkAgg`) — layer slider, play/scrub the nozzle + pole tip along `plan_insert_moves`, envelope violations flagged, "Open 3D view". `python main.py --preview FILE`. The 40 ms `_tick` loop (C31) only reschedules itself while `self.playing` — previously it kept ticking for as long as the window stayed open, playing or not, one of two measured contributors to "system feels slow" (see `ui/panel.py` Key Modules for the other, the 3D redraw throttle). |
 | `magnet_embed/sequences/geometry.py` | `compute_targets` / `plan_insert_moves` / `check_envelope(mi, config, saved, toolpath=None)` / `part_footprint` / `pole_point` — the one place the insert-motion targets are computed **and the one damage guard** (C25): pocket on the bed, nozzle targets inside the machine limits, no press into the build plate, and — with the toolpath — no press/shear that puts the nozzle inside the printed part, tested against only the layers already printed at insert time (`_printed_footprint`, C30) rather than the whole file. `insert_magnet` executes the targets; the preview + plan dialog draw and check the same numbers. |
 | `magnet_embed/sequences/insert_magnet.py` | The `SAVE → PARK → DISPENSE → APPROACH → PRESS → SHEAR → LIFT → ASK → RESUME` state machine. Targets come from `geometry.compute_targets`; `toolpath=` (keyword) enables the collision guard — every caller that has the file passes it. `on_phase=` (keyword, C26) fires once per phase with its exact nozzle-tip target (`None` for the two non-motion phases), from the same values the phase actually sends — a live-view caller can't drift from the run. |
 | `magnet_embed/app.py` | `Controller` — headless UI↔worker mediator (threads, queues, prompt blocking); optional `log_dir` writes a per-run transcript. `load_gcode()` caches a parsed `toolpath` + raw `gcode_lines` (best-effort — a parse failure logs and leaves them empty rather than blocking the load); `progress_point`/`current_line_text` derive the live nozzle position + current G-code line from them. `start_z_calibration()`/`nudge_z()`/`save_z_offset()` drive the Z Calibrate dialog (idle-only). `link_summary` → `"simulator"` / `"printer COM3"` / `"... + dispenser COM4"`, from whether the link objects have a `.port` (real) or not (sim). `in_insert` (read-only property, C26) + `_on_insert_phase` wire `insert_magnet`'s `on_phase` into a new `"phase"` event kind so the panel can show live progress during an insert instead of freezing at the sentinel. |
@@ -310,7 +314,11 @@ hardware attached.
 - `PlanInsertDialog` + pure helpers `resolve_target_z`, `magnet_output_path`,
   `save_magnet_gcode`, `envelope_report`. Enter pocket X/Y, seat Z, shear, and a
   target (layer index or Z height); live envelope check; **Save** writes
-  `<stem>.magnet.gcode` and loads it as the active file.
+  `<stem>.magnet.gcode` and loads it as the active file. Seat-Z defaults to the
+  chosen insert layer's own height (C31) — previously defaulted to the file's
+  overall top independent of the insert layer, which put the default seat
+  above where the insert actually happens whenever the part had more layers
+  above it.
 - **Embedded insert-motion preview (C22).** `_redraw_embedded_preview`, called
   from `_check()` on every keystroke — an X-Y + X-Z pair (`viz.toolpath_fig
   .draw_layer_xy`/`draw_side_xz`/`draw_insert_overlay`) showing the
@@ -451,17 +459,24 @@ hardware attached.
   Connect ↔ Disconnect toggle — `_toggle_connect` dispatches on
   `Controller.connected`, and its label/enabled-state are refreshed every
   `_refresh_buttons()` poll (disabled while `busy`, same as the other
-  idle-only controls). Load G-code, run/pause/resume/cancel,
+  idle-only controls). Load G-code, run/**Pause↔Resume** (C31 — one
+  `self.btn_pause` toggle, `_toggle_pause` dispatches on `Controller.paused`,
+  same pattern as Connect/Disconnect; was two separate buttons)/cancel,
   a red **EMERGENCY STOP** button at the top right (`self.btn_estop`, a plain
   `tk.Button` because the Windows ttk theme ignores background colours;
   always enabled, no confirm dialog, calls `Controller.emergency_stop`),
-  a run-progress bar, jog (0.1/1/10 mm) + home + "Level Bed…" + "Z Calibrate…"
-  (confirm dialogs first — both move the toolhead) + raw G-code entry +
-  extrude/retract **idle only**, "Plan magnet insert…", read-only log, live
-  position/temp line, an embedded **live-print view**. Auto-refreshes state
-  every `ui.idle_poll_s` while connected + idle. `_show_prompt` opens a modal
-  **Success / Retry / Abort** (or **Ready / Abort**) dialog that calls
-  `controller.answer_prompt`. Drains `poll_events()` every 120 ms.
+  a run-progress bar, jog (0.1/1/10 mm, bigger click targets since C31, plus
+  arrow-key/Page-Up-Down jog — `_bind_jog_keys`, bound on the toplevel and
+  ignored while a text-entry widget has focus or the panel is busy/running)
+  + home + "Level Bed…" + "Z Calibrate…" (confirm dialogs first — both move
+  the toolhead) + raw G-code entry + extrude/retract **idle only**, "Plan
+  magnet insert…", read-only log, live position/temp line, an embedded
+  **live-print view**. Auto-refreshes state every `ui.idle_poll_s` while
+  connected + idle. `_show_prompt` opens a modal **Success / Retry / Abort**
+  (or **Ready / Abort**) dialog that calls `controller.answer_prompt`. Drains
+  `poll_events()` every 120 ms; a `"done"` event logs a human-readable
+  "run finished: N/M lines sent, K magnet insert(s)" line (C31 — was a raw
+  dict dump).
 - **Two-column layout, opens maximized (C24).** `_build` puts the top
   bar/files/run/progress rows across the full width, then `_build_left`
   (jog/home, temperature, filament) and `_build_right` (live-print view,
@@ -508,16 +523,26 @@ hardware attached.
   view — a short/flat part is otherwise "hardly visible" against a 220 mm
   bed, per C24 driving feedback; confirmed via the introspection script that
   Local's box-aspect Z ratio is ~2.7× larger than Global's for the sample
-  file). A label under both canvases shows `controller.current_line_text` —
+  file). **Defaults to Local (C31)** — `self.live3d_global = False` and the
+  button's initial label ("Local part") match; Global is one click away. A
+  label under both canvases shows `controller.current_line_text` —
   "what the current step looks like" as text, not just a dot on the plot. The
   2D layer only redraws when the active layer changes; the 3D path/marker
   update via cheap `set_data`/`set_3d_properties` calls, not a full redraw —
   both cheap enough to run often. Throttled off the existing 120 ms tick via
   `ui.live_view_poll_s` (default **0.15 s** — lowered from 1.0 s in C22 once
-  driving feedback called the motion "not smooth"). Static (current layer,
-  no marker/path) once a file loads; tracks line progress once a run starts
-  and freezes at the final position when it ends. No extra printer traffic —
-  position comes from `Toolpath.progress_position`, not a polled `M114`.
+  driving feedback called the motion "not smooth"). **3D throttled further
+  still (C31)** — `ui.live3d_poll_s` (default **0.3 s**, ~2× the 2D rate)
+  gates `_live3d_calls % self._live3d_every == 0` around the 3D
+  update+`draw_idle()` only; the 2D marker still updates every tick. A full
+  `Axes3D` redraw costs more than a `Line2D` `set_data` call, and this was
+  one of the two measured contributors to the owner's "system feels slow"
+  report (the other — the Animate popup's 40 ms tick running even while
+  paused — is fixed in `viz/preview.py`, see its own entry). Static (current
+  layer, no marker/path) once a file loads; tracks line progress once a run
+  starts and freezes at the final position when it ends. No extra printer
+  traffic — position comes from `Toolpath.progress_position`, not a polled
+  `M114`.
 - **Insert-phase override (C26).** While `controller.in_insert` and a
   `"phase"` event has arrived, the 2D marker (`tf.update_live_marker`) and 3D
   marker (`tf.update_live_3d_marker`, marker-only, doesn't touch the growing
