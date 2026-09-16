@@ -62,12 +62,13 @@ involvement is acceptable at this stage.
 > Build status: **C1–C8 + Phase 1.6 (C13–C19) + Phase 1.7 (C20) + Phase 1.8
 > (C21) + Phase 1.9 (C22) + Phase 1.10 (C23) + Phase 1.11 (C24) + Phase 1.12
 > (C25: nozzle-vs-part collision guard + Emergency Stop) + Phase 1.13 (C26:
-> insert-phase live view) done, plus mid-print temp control, a Level Bed
+> insert-phase live view) + Phase 1.14 (C27: safe-cancel + off-thread
+> Home/Level Bed/Z-cal) done, plus mid-print temp control, a Level Bed
 > button, a run-report summary in the log, in-panel config editing, an
 > embedded live-print view showing 2D and equal-scale bed-aware 3D side by
 > side with a Global-bed/Local-part crop toggle, a guided Z-offset
 > calibration dialog, and a two-column panel that opens maximized and shows
-> what it's actually connected to — 248 tests** (`project/BUILD_PLAN.md`).
+> what it's actually connected to — 251 tests** (`project/BUILD_PLAN.md`).
 > One root `python main.py` (mode by flag), `gcode/toolpath.py`, shared
 > `sequences/geometry.py`, a matplotlib toolpath + insert-motion preview
 > (`main.py --preview`), a "Plan magnet insert…" dialog that saves
@@ -128,7 +129,7 @@ back-compat wrappers that call `entry` with a fixed mode.
 
 | Path | Role |
 |------|------|
-| `magnet_embed/config.yaml` | All ports, baud, park/safe-Z, temps (incl. `nozzle_min_c`/`nozzle_max_c`/`bed_min_c`/`bed_max_c` guard rails for `set_temp`), the magnet-tool XYZ offset, press/shear distances + feeds, `collision.*` (`nozzle_clearance_mm` the nozzle must keep above the printed top while over the part, `footprint_margin_mm` grown around the part's bbox — the C25 damage guard), sentinel token, `zcal.*` (Z-offset calibration point/step/feed and the trusted `probe_z_offset`). Nothing hardware-specific is hardcoded elsewhere. |
+| `magnet_embed/config.yaml` | All ports, baud, park/safe-Z, temps (incl. `nozzle_min_c`/`nozzle_max_c`/`bed_min_c`/`bed_max_c` guard rails for `set_temp`), the magnet-tool XYZ offset, press/shear distances + feeds, `collision.*` (`nozzle_clearance_mm` the nozzle must keep above the printed top while over the part, `footprint_margin_mm` grown around the part's bbox — the C25 damage guard), `cancel.heaters_off` (C27: whether `Controller.cancel()`'s safe-cancel retreat turns the heaters off), sentinel token, `zcal.*` (Z-offset calibration point/step/feed and the trusted `probe_z_offset`). Nothing hardware-specific is hardcoded elsewhere. |
 | `main.py` (repo root) | **The** entry point. `--sim` (default) / `--printer` / `--hardware`; `--ping`, `--no-gui` (headless + `--confirm`), `--no-dispenser`, `--config`. All it does is parse args and call `magnet_embed.entry`. |
 | `magnet_embed/entry.py` | Shared wiring: `build_links(mode, config)` → `(printer, dispenser)`; `ping()`; `run_headless()`; `launch_panel()`. One place that constructs links and runs the smoke test. |
 | `magnet_embed/main.py` / `main_printer.py` / `main_sim.py` | Back-compat `python -m …` wrappers — each parses its small CLI and calls `entry` with a fixed mode (`hardware` / `printer` / `sim`). The Uno stays optional in `hardware` mode: a dispenser that fails to connect degrades to printer-only for the session. |
@@ -205,16 +206,30 @@ No `G28` anywhere — every move after `SAVE` is commanded and tracked (Dev Rule
 - Threads talk to the UI through a thread-safe queue polled via `root.after(...)`.
   No Tkinter calls off the main thread.
 - `Controller._printer_lock` (a `threading.Lock`) guards every `printer.command()`/
-  `query_state()` call that could otherwise run concurrently with the worker
-  thread's own send/`ok` handshake. `jog`/`home`/`extrude`/`send_command`/
-  `refresh_state` stay idle-only (`self.running` guard) so they never need it.
-  `set_temp` is the one action allowed to run *during* a print — it takes the
-  lock, and `GcodeRunner.run()` (constructed with the same lock in `start_run()`)
-  takes it around each streamed line's send+`ok`, so the two can't interleave on
-  the shared serial connection. `set_temp` additionally checks `Controller._in_insert`
+  `query_state()` call that could otherwise run concurrently with another one.
+  `jog`/`extrude`/`send_command` stay idle-only (`self.running or self._busy`
+  guard) and never touch the lock — nothing else can be running while they do.
+  `home`/`level_bed`/`start_z_calibration` (C27) are also idle-only, but now
+  run on a background thread (`_run_offline`) that *does* take the lock for
+  its whole duration, so the Tk main loop stays responsive during a `G28`/`G29`
+  that can take tens of seconds to a couple of minutes; `self._busy` is true
+  for that whole span and gates every other idle-only action, including a
+  second call to any of the three.
+  `set_temp`/`refresh_state` are the two actions allowed to run *during* a
+  print (and while a background one-off command is in flight) — they take the
+  lock with a short bounded wait (`_LOCK_WAIT_S = 0.3` s, C27) rather than
+  blocking indefinitely, so they can't relocate the same "Tk main loop frozen"
+  problem C27 fixed onto themselves; failing to acquire it just skips that
+  call (a log line for `set_temp`, silently for the timer-driven
+  `refresh_state`). `GcodeRunner.run()` (constructed with the same lock in
+  `start_run()`) takes it around each streamed line's send+`ok`, so a normal
+  print and `set_temp`/`refresh_state` can't interleave on the shared serial
+  connection either. `set_temp` additionally checks `Controller._in_insert`
   and refuses while `sequences.insert_magnet` is driving the printer directly
   (unlocked, on the worker thread) — the sequence owns the heaters during the
-  pause (Dev Rule 6).
+  pause (Dev Rule 6). `Controller.cancel()` (C27) spawns its own
+  `_safe_cancel_retreat` thread that waits for the worker to stop before
+  taking the lock — see Key Conventions.
 
 ### Simulation vs real
 
@@ -392,13 +407,22 @@ hardware attached.
   that progress (`""` if none), `toolpath`/`gcode_lines` (cached by `load_gcode()`,
   best-effort), `link_summary` → `"simulator"` / `"printer COM3"` / `"printer
   COM3 + dispenser COM4"` (whether `printer`/`dispenser` have a real `.port`),
-  `in_insert` (C26) → whether `insert_magnet` currently owns the printer.
+  `in_insert` (C26) → whether `insert_magnet` currently owns the printer,
+  `busy` (C27) → whether a background one-off command (`_run_offline`) is in
+  flight.
 - `_on_insert_phase(phase, position)` (C26) — the `on_phase` callback passed
   into `insert_magnet`; emits a `"phase"` event (`{"phase": ..., "position":
   ...}`) so the panel's live view can track the actual insert motion instead
   of the frozen line-progress position.
 - Event kinds: `log`, `state` (a `PrinterState`), `prompt` (`"dispense"`/`"confirm"`),
   `done`, `error`, `phase` (`{"phase": str, "position": (x,y,z) | None}`, C26).
+- `_run_offline(fn)` (C27) — runs `fn` (which does its printer calls inside
+  `with self._printer_lock:`) on a daemon thread, `self._busy = True` for the
+  duration; `home()`/`level_bed()`/`start_z_calibration()` are built on it so
+  none of the three blocks the Tk main loop. `cancel()` similarly spawns a
+  `_safe_cancel_retreat` thread (waits for the worker to actually stop, then
+  retract/lift/park/heaters-off — see Key Conventions and Known Technical
+  Debt). Every idle-only action's guard is `if self.running or self._busy:`.
 
 ### `ui/panel.py` — `ControlPanel` + `run_gui(controller)`
 - Thin Tkinter view over a `Controller`. Connect, load G-code, run/pause/resume/cancel,
@@ -556,6 +580,13 @@ hardware attached.
 - **Pause hygiene.** Retract before parking; drop the nozzle to `standby_nozzle_temp_c`
   during the pause / operator prompt; keep the bed hot; un-retract + prime + wipe on
   resume. Keep the pause as short as the operator check allows.
+- **Safe-cancel retreat (C27).** `Controller.cancel()` stops streaming, then —
+  once the worker has actually stopped (bounded `join`, never while an insert
+  still owns the printer) — retracts, lifts, parks at `park.{x,y}`, and (if
+  `config.cancel.heaters_off`, default `true`) turns both heaters off. Skipped
+  entirely after an e-stop (`estopped`) or if the worker is still finishing
+  something (e.g. an insert's pending operator prompt) — logs that it was
+  skipped rather than racing that code's own printer calls.
 
 ---
 
@@ -679,16 +710,29 @@ parks, magnet dispensed, controlled press + lateral shear run, print resumes and
   pocket-near-edge design decision is still open (`project/PROJECT_PLAN.md`
   §6).
 - ~~No emergency stop~~ — **fixed in C25** (`Controller.emergency_stop`, red
-  panel button). Still open: **no safe cancel** — `Controller.cancel` only
-  stops streaming (heaters stay on, head stays put); a configurable cancel
-  routine (retract, lift, park, heaters off) is still planned. Also unverified
-  on hardware: whether the stock V3 SE firmware has `EMERGENCY_PARSER`
-  (`M112` honoured mid-command) — bench-test the button with a long move in
-  flight before relying on it.
-- **Home / Level Bed / Z Calibrate block the Tk main thread** for their whole
-  duration, so nothing in the panel (including a future stop button) is
-  clickable during a two-minute probe. Planned: run one-off commands on a short
-  worker thread under `_printer_lock`.
+  panel button). Unverified on hardware: whether the stock V3 SE firmware has
+  `EMERGENCY_PARSER` (`M112` honoured mid-command) — bench-test the button
+  with a long move in flight before relying on it.
+- ~~No safe cancel~~ — **fixed in C27**. `Controller.cancel()` now spawns a
+  background `_safe_cancel_retreat` that waits for the worker to actually
+  stop, then retracts, lifts, parks at `park.{x,y}`, and (if
+  `config.cancel.heaters_off`, default `true`) sends `M104 S0`/`M140 S0`.
+  Skips the retreat if the worker is still alive after a bounded join (e.g.
+  cancel pressed mid-insert, while the operator prompt is still pending) —
+  logs that it was skipped rather than racing `insert_magnet`'s own printer
+  calls, and tells the operator to use EMERGENCY STOP if it's urgent.
+- ~~Home / Level Bed / Z Calibrate block the Tk main thread~~ — **fixed in
+  C27**. All three now run on a background thread (`Controller._run_offline`,
+  under `_printer_lock`) instead of blocking the caller; a new `busy`
+  property/`_busy` flag guards every other idle-only action (and a second
+  call to any of the three) while one is in flight, the same way `running`
+  already did. `nudge_z`/`save_z_offset` stay synchronous on purpose — single
+  fast commands, not the reported freeze. Because a background action can now
+  hold `_printer_lock` for a long time, `set_temp`/`refresh_state` switched
+  from an unbounded `with self._printer_lock:` to a short bounded wait
+  (`_LOCK_WAIT_S = 0.3` s) so they can't relocate the same freeze onto
+  themselves — long enough to ride out the streaming loop's normal brief
+  per-line hold, short enough to never be perceptible.
 - **`Controller.connect` is not idempotent and there is no Disconnect.** A
   second Connect click on a real link reopens an open port; the exception
   escapes the Tk callback and nothing shows in the panel.

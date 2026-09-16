@@ -72,6 +72,11 @@ collision:
 sequence:
   max_retries: 3           # operator "retry" answers allowed before the insert aborts
 
+# Cancel (C27): after stopping the stream, Controller.cancel() retracts, lifts
+# clear, parks at park.{x,y}, and - if heaters_off - turns both heaters off.
+cancel:
+  heaters_off: true
+
 ui:
   idle_poll_s: 2.0         # panel auto-refreshes position + temps this often while idle; 0 disables
   live_view_poll_s: 0.15   # panel redraws the embedded live-print view this often during a run; 0 disables

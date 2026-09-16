@@ -35,6 +35,12 @@ from .state import MagnetInsert
 
 Event = tuple[str, object]  # (kind, payload); kinds: log state prompt done error phase
 
+#: `set_temp`/`refresh_state` wait at most this long for `_printer_lock`
+#: (C27) - long enough to ride out the streaming loop's brief per-line hold,
+#: short enough that a background one-off command (Home/Level Bed/Z-cal,
+#: which can hold the lock for tens of seconds) never visibly freezes the UI.
+_LOCK_WAIT_S = 0.3
+
 
 class Controller:
     def __init__(
@@ -77,12 +83,23 @@ class Controller:
         # answer is needed to unblock the worker.
         self._prompt_pending = False
         self._estopped = False
+        # True while a background one-off command (home/level_bed/
+        # start_z_calibration, via `_run_offline`) is in flight - guards every
+        # other idle-only action the same way `running` does, since the Tk
+        # main thread is free to click something else while these now run.
+        self._busy = False
 
     # --- state -------------------------------------------------------
 
     @property
     def running(self) -> bool:
         return self._worker is not None and self._worker.is_alive()
+
+    @property
+    def busy(self) -> bool:
+        """True while a background one-off command (home/level_bed/
+        start_z_calibration) is in flight - see `_run_offline`."""
+        return self._busy
 
     @property
     def connected(self) -> bool:
@@ -188,8 +205,8 @@ class Controller:
         self._emit("log", f"loaded {self.gcode_path.name}")
 
     def jog(self, axis: str, distance: float) -> None:
-        if self.running:
-            self._emit("log", "jog ignored - a run is active")
+        if self.running or self._busy:
+            self._emit("log", "jog ignored - busy")
             return
         feed = self.config["travel"]["feed"]
         try:
@@ -201,17 +218,39 @@ class Controller:
             return
         self._emit_state()
 
+    def _run_offline(self, fn) -> None:
+        """Run `fn` (which does its own printer calls, inside
+        `with self._printer_lock:`) on a daemon thread instead of blocking the
+        caller - used for the one-off commands that can take a while (Home,
+        Level Bed, start Z-calibration) so the Tk main loop stays responsive.
+        `fn` must catch its own printer errors and turn them into `_emit`
+        calls; nothing here re-raises."""
+        self._busy = True
+
+        def _worker() -> None:
+            try:
+                fn()
+            finally:
+                self._busy = False
+
+        threading.Thread(target=_worker, name="offline-command", daemon=True).start()
+
     def home(self) -> None:
-        if self.running:
-            self._emit("log", "home ignored - a run is active")
+        if self.running or self._busy:
+            self._emit("log", "home ignored - busy")
             return
-        try:
-            self.printer.command("G28")
-        except (PrinterError, AckTimeout, ResendRequested) as exc:
-            self._emit("error", f"{type(exc).__name__}: {exc}")
-            return
-        self._emit("log", "homed")
-        self._emit_state()
+
+        def _do() -> None:
+            with self._printer_lock:
+                try:
+                    self.printer.command("G28")
+                except (PrinterError, AckTimeout, ResendRequested) as exc:
+                    self._emit("error", f"{type(exc).__name__}: {exc}")
+                    return
+            self._emit("log", "homed")
+            self._emit_state()
+
+        self._run_offline(_do)
 
     def set_temp(self, which: str, value: float) -> None:
         """Set the nozzle/bed target. Range-checked; allowed during a normal
@@ -234,13 +273,23 @@ class Controller:
             )
             return
         code = "M104" if which == "nozzle" else "M140"
-        with self._printer_lock:
-            try:
-                self.printer.command(f"{code} S{value:g}")
-                state = self.printer.query_state()
-            except (PrinterError, AckTimeout, ResendRequested) as exc:
-                self._emit("error", f"{type(exc).__name__}: {exc}")
-                return
+        # A short *bounded* wait, not the old unbounded `with self._printer_lock:`
+        # - the streaming loop only ever holds the lock for one line (fine to
+        # wait out, same as before), but a background one-off command
+        # (`_run_offline`) can now hold it for tens of seconds (a G28/G29),
+        # and blocking on that would just relocate the "Tk main loop frozen"
+        # problem C27 fixed.
+        if not self._printer_lock.acquire(timeout=_LOCK_WAIT_S):
+            self._emit("log", f"{which} temp change ignored - printer busy, try again")
+            return
+        try:
+            self.printer.command(f"{code} S{value:g}")
+            state = self.printer.query_state()
+        except (PrinterError, AckTimeout, ResendRequested) as exc:
+            self._emit("error", f"{type(exc).__name__}: {exc}")
+            return
+        finally:
+            self._printer_lock.release()
         self._emit("state", state)
 
     def send_command(self, line: str) -> None:
@@ -248,8 +297,8 @@ class Controller:
         line = line.strip()
         if not line:
             return
-        if self.running:
-            self._emit("log", f"command ignored - a run is active: {line}")
+        if self.running or self._busy:
+            self._emit("log", f"command ignored - busy: {line}")
             return
         self._emit("log", f"> {line}")
         try:
@@ -267,19 +316,25 @@ class Controller:
         only reads (`M105`/`M400`/`M114`), same reasoning as `set_temp`."""
         if not self._connected or self._in_insert or self._estopped:
             return                     # estopped: a halted board would fail every poll
-        with self._printer_lock:
-            try:
-                self.printer.command("M105")
-                state = self.printer.query_state()
-            except (PrinterError, AckTimeout, ResendRequested) as exc:
-                self._emit("error", f"{type(exc).__name__}: {exc}")
-                return
+        # Bounded wait, same reasoning as `set_temp`: this fires on a timer,
+        # so if a background one-off command is holding the lock for a while,
+        # skip this tick rather than freezing the UI to wait it out.
+        if not self._printer_lock.acquire(timeout=_LOCK_WAIT_S):
+            return
+        try:
+            self.printer.command("M105")
+            state = self.printer.query_state()
+        except (PrinterError, AckTimeout, ResendRequested) as exc:
+            self._emit("error", f"{type(exc).__name__}: {exc}")
+            return
+        finally:
+            self._printer_lock.release()
         self._emit("state", state)
 
     def extrude(self, mm: float, feed: float) -> None:
         """Extrude `mm` at `feed` mm/min (negative `mm` = retract). Idle only."""
-        if self.running:
-            self._emit("log", "extrude/retract ignored - a run is active")
+        if self.running or self._busy:
+            self._emit("log", "extrude/retract ignored - busy")
             return
         try:
             self.printer.command("M83")
@@ -302,50 +357,67 @@ class Controller:
         Known Technical Debt. Running this before a print gets you a fresh,
         enabled, saved mesh; it does NOT survive the print's own `G28` unless
         the slicer's start G-code (or `GcodeRunner`) re-sends `M420 S1` after it.
+
+        Runs on a background thread (`_run_offline`, C27) so the Tk main loop
+        stays responsive for the whole probe - only `_busy`/`running` gate a
+        second call, not the caller blocking on this one.
         """
-        if self.running:
-            self._emit("log", "bed leveling ignored - a run is active")
+        if self.running or self._busy:
+            self._emit("log", "bed leveling ignored - busy")
             return
-        try:
-            self.printer.command("G28")
-            self.printer.command("G29")
-            self.printer.command("M420 S1")
-            self.printer.command("M500")
-        except (PrinterError, AckTimeout, ResendRequested) as exc:
-            self._emit("error", f"{type(exc).__name__}: {exc}")
-            return
-        self._emit("log", "bed leveling complete: probed, enabled, saved to EEPROM")
-        self._emit_state()
+
+        def _do() -> None:
+            with self._printer_lock:
+                try:
+                    self.printer.command("G28")
+                    self.printer.command("G29")
+                    self.printer.command("M420 S1")
+                    self.printer.command("M500")
+                except (PrinterError, AckTimeout, ResendRequested) as exc:
+                    self._emit("error", f"{type(exc).__name__}: {exc}")
+                    return
+            self._emit("log", "bed leveling complete: probed, enabled, saved to EEPROM")
+            self._emit_state()
+
+        self._run_offline(_do)
 
     def start_z_calibration(self) -> None:
         """Home, then travel to `config.zcal.{x,y,start_z}` - the starting point
         for a paper-test Z-offset calibration (see `ui/zcal_dialog.py`). Idle
-        only, like `home()`/`level_bed()`."""
-        if self.running:
-            self._emit("log", "Z calibration ignored - a run is active")
+        only, like `home()`/`level_bed()`; runs on a background thread
+        (`_run_offline`, C27) since it starts with a `G28`."""
+        if self.running or self._busy:
+            self._emit("log", "Z calibration ignored - busy")
             return
         zc = self.config["zcal"]
         feed = self.config["travel"]["feed"]
-        try:
-            self.printer.command("G28")
-            self.printer.command(
-                f"G1 X{zc['x']:g} Y{zc['y']:g} Z{zc['start_z']:g} F{feed:g}"
+
+        def _do() -> None:
+            with self._printer_lock:
+                try:
+                    self.printer.command("G28")
+                    self.printer.command(
+                        f"G1 X{zc['x']:g} Y{zc['y']:g} Z{zc['start_z']:g} F{feed:g}"
+                    )
+                except (PrinterError, AckTimeout, ResendRequested) as exc:
+                    self._emit("error", f"{type(exc).__name__}: {exc}")
+                    return
+            self._emit(
+                "log",
+                f"Z calibration: homed, at X{zc['x']:g} Y{zc['y']:g} Z{zc['start_z']:g} "
+                "- nudge down carefully with a sheet of paper under the nozzle",
             )
-        except (PrinterError, AckTimeout, ResendRequested) as exc:
-            self._emit("error", f"{type(exc).__name__}: {exc}")
-            return
-        self._emit(
-            "log",
-            f"Z calibration: homed, at X{zc['x']:g} Y{zc['y']:g} Z{zc['start_z']:g} "
-            "- nudge down carefully with a sheet of paper under the nozzle",
-        )
-        self._emit_state()
+            self._emit_state()
+
+        self._run_offline(_do)
 
     def nudge_z(self, delta: float) -> None:
         """Fine relative Z move for Z-offset calibration, at `config.zcal.feed`
-        (deliberately slow). Idle only."""
-        if self.running:
-            self._emit("log", "Z nudge ignored - a run is active")
+        (deliberately slow). Idle only. Stays synchronous (unlike `home`/
+        `level_bed`/`start_z_calibration`) - it's a single fast move, not the
+        reported "panel freezes" pain point."""
+        if self.running or self._busy:
+            self._emit("log", "Z nudge ignored - busy")
             return
         feed = self.config["zcal"]["feed"]
         try:
@@ -365,8 +437,8 @@ class Controller:
         (Settings dialog), not a value read back from the printer (the exact
         M851 report text for this firmware fork is unverified - see
         `.CLAUDE/CLAUDE.md` -> Known Technical Debt). Idle only."""
-        if self.running:
-            self._emit("log", "Z offset save ignored - a run is active")
+        if self.running or self._busy:
+            self._emit("log", "Z offset save ignored - busy")
             return
         new_offset = round(self.config["zcal"]["probe_z_offset"] + cumulative_delta, 3)
         try:
@@ -383,7 +455,7 @@ class Controller:
         )
 
     def start_run(self) -> None:
-        if self.running:
+        if self.running or self._busy:
             return
         if self.gcode_path is None:
             self._emit("log", "no G-code file loaded")
@@ -409,9 +481,58 @@ class Controller:
             self._emit("log", "resumed")
 
     def cancel(self) -> None:
+        """Stop streaming, then leave the printer safe: retract, lift, park,
+        and (if `config.cancel.heaters_off`) turn the heaters off. The retreat
+        runs on a background thread that waits for the streaming worker to
+        actually stop first (Cancel only *signals* the runner - it may still
+        be mid-line, or blocked inside an active insert's operator prompt -
+        sending new commands before it's really stopped would race
+        `GcodeRunner`'s or `insert_magnet`'s own printer calls)."""
         if self.runner is not None:
             self.runner.cancel()
             self._emit("log", "cancelling")
+            threading.Thread(
+                target=self._safe_cancel_retreat, name="safe-cancel", daemon=True
+            ).start()
+
+    def _safe_cancel_retreat(self) -> None:
+        worker = self._worker
+        if worker is not None:
+            worker.join(timeout=self.config["printer"]["ack_timeout_s"] + 5)
+            if worker.is_alive():
+                self._emit(
+                    "log",
+                    "cancel: run still finishing (e.g. a magnet insert in progress) "
+                    "- safe-cancel retreat skipped; use EMERGENCY STOP if this is urgent",
+                )
+                return
+        if self._estopped or self._in_insert:
+            return          # nothing to retreat from / the insert owns the printer
+        retract = self.config["retract"]
+        park = self.config["park"]
+        travel_feed = self.config["travel"]["feed"]
+        with self._printer_lock:
+            try:
+                state = self.printer.query_state()
+                safe_z = min(
+                    state.z + self.config["park"]["safe_z_lift_mm"],
+                    self.config["machine"]["z_max"],
+                )
+                self.printer.command("M83")
+                self.printer.command(f"G1 E-{retract['mm']:g} F{retract['feed']:g}")
+                self.printer.command("G90")
+                self.printer.command(f"G1 Z{safe_z:g} F{travel_feed:g}")
+                self.printer.command(f"G1 X{park['x']:g} Y{park['y']:g} F{travel_feed:g}")
+                heaters_off = self.config.get("cancel", {}).get("heaters_off", True)
+                if heaters_off:
+                    self.printer.command("M104 S0")
+                    self.printer.command("M140 S0")
+            except (PrinterError, AckTimeout, ResendRequested) as exc:
+                self._emit("error", f"safe-cancel retreat failed: {type(exc).__name__}: {exc}")
+                return
+        suffix = ", heaters off" if heaters_off else " (heaters left as-is)"
+        self._emit("log", f"safe-cancel retreat complete: retracted, parked{suffix}")
+        self._emit_state()
 
     def answer_prompt(self, value: str) -> None:
         self._answers.put(value)

@@ -122,6 +122,56 @@ def test_cancel_stops_the_run(config):
     assert not ctl.runner.finished
 
 
+def test_cancel_leaves_the_printer_safe(config):
+    """C27: after stopping the stream, cancel() retracts, lifts, parks, and
+    turns the heaters off (config.cancel.heaters_off, default True)."""
+    ctl = _ctl(config, delay=0.03)
+    ctl.load_gcode(SAMPLE)
+    ctl.start_run()
+    assert _wait(lambda: ctl.running)
+    ctl.cancel()
+    assert _wait(lambda: not ctl.running)
+    assert _wait(lambda: "M140 S0" in ctl.printer.sent, timeout=6.0)
+    sent = ctl.printer.sent
+    assert any(s.startswith("G1 E-") for s in sent)                  # retract
+    assert "M104 S0" in sent and "M140 S0" in sent                   # heaters off
+    park = config["park"]
+    assert any(s.startswith(f"G1 X{park['x']:g} Y{park['y']:g}") for s in sent)  # parked
+
+
+def test_home_runs_on_a_background_thread(config):
+    """C27: home()/level_bed()/start_z_calibration() no longer block the
+    caller - `_busy` flips True synchronously, other idle actions (and a
+    second Home) are refused while it's in flight instead of racing it."""
+    ctl = _ctl(config, delay=0.2)
+    ctl.home()
+    assert ctl.busy                       # set synchronously, before the worker thread runs
+    ctl.jog("X", 5.0)                     # refused - busy, not queued
+    ctl.home()                            # refused too
+    logs = [str(p) for k, p in ctl.poll_events() if k == "log"]
+    assert any("ignored - busy" in m for m in logs)
+    assert _wait(lambda: not ctl.busy, timeout=4.0)
+    assert ctl.printer.sent.count("G28") == 1     # the second Home call never sent anything
+
+
+def test_set_temp_does_not_block_while_busy(config):
+    """C27: set_temp waits at most `_LOCK_WAIT_S` for `_printer_lock`, not
+    however long the background Home/Level-Bed/Z-cal command takes - it must
+    not relocate the "Tk main loop frozen" problem the background thread
+    was added to fix."""
+    ctl = _ctl(config, delay=1.0)         # Home holds _printer_lock ~1.0s
+    ctl.home()
+    time.sleep(0.05)                      # let the background thread acquire the lock
+    assert ctl.busy
+    t0 = time.time()
+    ctl.set_temp("nozzle", 200)
+    assert time.time() - t0 < 0.6         # did not wait out Home's full hold
+    logs = [str(p) for k, p in ctl.poll_events() if k == "log"]
+    assert any("busy" in m.lower() for m in logs)
+    assert "M104 S200" not in ctl.printer.sent
+    assert _wait(lambda: not ctl.busy, timeout=4.0)
+
+
 def test_start_run_without_file_is_a_noop(config):
     ctl = _ctl(config)
     ctl.start_run()
@@ -192,7 +242,7 @@ def test_send_command_ignored_while_running(config):
     ctl.start_run()
     assert _wait(lambda: ctl.running)
     ctl.send_command("M114")
-    assert any(k == "log" and "run is active" in str(p) for k, p in ctl.poll_events())
+    assert any(k == "log" and "ignored - busy" in str(p) for k, p in ctl.poll_events())
     _pump_until(ctl, "done", answer="success")
 
 
@@ -277,8 +327,11 @@ def _boom(_line, timeout_s=None):
 
 
 def test_level_bed_sends_probe_enable_and_save(config):
+    # C27: level_bed() runs on a background thread (`Controller._run_offline`)
+    # so the Tk main loop stays responsive for the whole probe - wait for it.
     ctl = _ctl(config)
     ctl.level_bed()
+    assert _wait(lambda: not ctl.busy)
     assert ctl.printer.sent[-4:] == ["G28", "G29", "M420 S1", "M500"]
 
 
@@ -298,6 +351,7 @@ def test_level_bed_surfaces_printer_error(config):
     ctl = _ctl(config)
     ctl.printer.command = _boom
     ctl.level_bed()
+    assert _wait(lambda: not ctl.busy)
     assert any(k == "error" for k, _ in ctl.poll_events())
 
 
@@ -312,6 +366,7 @@ def test_home_surfaces_printer_error(config):
     ctl = _ctl(config)
     ctl.printer.command = _boom
     ctl.home()
+    assert _wait(lambda: not ctl.busy)
     assert any(k == "error" for k, _ in ctl.poll_events())
 
 
@@ -432,8 +487,11 @@ def test_current_line_text_tracks_progress(config):
 # --- C21: Z-offset calibration ---------------------------------------
 
 def test_start_z_calibration_homes_and_travels(config):
+    # C27: start_z_calibration() also runs on a background thread (it starts
+    # with a G28) - wait for it.
     ctl = _ctl(config)
     ctl.start_z_calibration()
+    assert _wait(lambda: not ctl.busy)
     zc = config["zcal"]
     assert ctl.printer.sent[-2] == "G28"
     assert ctl.printer.sent[-1] == (

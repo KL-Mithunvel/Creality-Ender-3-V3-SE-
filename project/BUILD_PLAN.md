@@ -9,7 +9,7 @@ chunks. Each chunk: build → `pytest` green → stage → commit.
 |--|--|
 | Owner | kl mithunvel |
 | Created | 2026-09-09 |
-| Status | **C1–C8 + Phase 1.6 (C13–C19) + C20 + C21 + C22 + C23 + C24 + C25 (collision guard + Emergency Stop) + C26 (insert-phase live view) done — 248 tests.** One root `python main.py` (mode by flag, opens maximized), bring-your-own-G-code, toolpath + insert-motion preview, "Plan magnet insert…" dialog (now with an embedded live preview of the insert motion), a two-column panel (jog/temperature/filament on the left, the live-print view + send-G-code + log on the right, both stretching to fill a maximized window) with a mode/port indicator, an embedded live-print view (2D current-layer + isometric 3D shown side by side, with a Global-bed/Local-part crop toggle and tight equal-scale axes — a path that grows as the nozzle passes through it, and tracks the actual insert-motion waypoints instead of freezing during a magnet insert — plus a nozzle marker and current-step G-code text) during a run, and a guided Z-offset calibration dialog. Magnet-flow hardware smoke test still pending the applicator build; the Z-calibration workflow is itself untested on real hardware — see Known Technical Debt. |
+| Status | **C1–C8 + Phase 1.6 (C13–C19) + C20 + C21 + C22 + C23 + C24 + C25 (collision guard + Emergency Stop) + C26 (insert-phase live view) + C27 (safe-cancel + off-thread Home/Level Bed/Z-cal) done — 251 tests.** One root `python main.py` (mode by flag, opens maximized), bring-your-own-G-code, toolpath + insert-motion preview, "Plan magnet insert…" dialog (now with an embedded live preview of the insert motion), a two-column panel (jog/temperature/filament on the left, the live-print view + send-G-code + log on the right, both stretching to fill a maximized window) with a mode/port indicator, an embedded live-print view (2D current-layer + isometric 3D shown side by side, with a Global-bed/Local-part crop toggle and tight equal-scale axes — a path that grows as the nozzle passes through it, and tracks the actual insert-motion waypoints instead of freezing during a magnet insert — plus a nozzle marker and current-step G-code text) during a run, and a guided Z-offset calibration dialog. Magnet-flow hardware smoke test still pending the applicator build; the Z-calibration workflow is itself untested on real hardware — see Known Technical Debt. |
 | Overall plan | `project/PROJECT_PLAN.md` |
 | Architecture / rules | `.CLAUDE/CLAUDE.md` |
 
@@ -1118,6 +1118,60 @@ review as one of three follow-ups after C25.
   no screenshot) across a sentinel-triggered insert — the "current step"
   label tracked PARK → DISPENSE → APPROACH → PRESS → CONFIRM with no
   exceptions from either the 2D or 3D draw path.
+
+---
+
+## Phase 1.14 — Safe-cancel + off-main-thread one-off commands
+
+### C27 — `Controller.cancel()` retreat; Home/Level Bed/Z-cal on a background thread  ✅
+
+**Why.** Two items from the 2026-09-16 review's TODO list: `cancel()` only
+ever stopped streaming (heaters stayed on, head stayed put), and Home/Level
+Bed/Z Calibrate each blocked the Tk main loop for their whole duration
+(a `G28`/`G29` can run tens of seconds to a couple of minutes) — nothing in
+the panel, including a future stop button, was clickable meanwhile.
+
+**Done:**
+- `app.Controller` — new `_busy` bool / `busy` property, true while a
+  background one-off command is in flight; every idle-only action's guard
+  widened from `if self.running:` to `if self.running or self._busy:`.
+- `_run_offline(fn)` — runs `fn` (which takes `_printer_lock` itself) on a
+  daemon thread, `_busy = True` for the duration. `home()`, `level_bed()`,
+  and `start_z_calibration()` are now built on it — the three that send a
+  `G28`/`G29` and are the actual reported freeze. `nudge_z`/`save_z_offset`
+  stay synchronous on purpose (single fast commands, not the pain point).
+- `cancel()` — after `runner.cancel()`, spawns `_safe_cancel_retreat`:
+  `worker.join(timeout=ack_timeout_s + 5)` first (skips the retreat, with a
+  log explaining why, if the worker is still alive — e.g. blocked inside an
+  active insert's operator prompt, so it can't race `insert_magnet`'s own
+  printer calls); then, unless `estopped`, retracts, lifts to
+  `min(z + park.safe_z_lift_mm, machine.z_max)`, parks at `park.{x,y}`, and
+  (if `config.cancel.heaters_off`, new key, default `true`) sends
+  `M104 S0`/`M140 S0`.
+- `set_temp`/`refresh_state` — switched from an unbounded
+  `with self._printer_lock:` to `self._printer_lock.acquire(timeout=
+  _LOCK_WAIT_S)` (`0.3` s). Needed because a background one-off command can
+  now hold the lock for a long time; blocking on it would just relocate the
+  exact freeze this chunk fixed onto `set_temp`/`refresh_state` instead. The
+  short timeout still comfortably rides out the streaming loop's normal
+  brief per-line hold (the pre-existing contention case), confirmed by
+  running the full suite 3× in a row with no flakes after the change.
+- `ui/panel.py` `_refresh_buttons` — `idle_state` now also disables while
+  `self.c.busy`, not just `self.c.running`.
+- `config.yaml` — new `cancel: {heaters_off: true}`.
+- **A real regression found and fixed along the way:** four pre-existing
+  tests (`test_level_bed_sends_probe_enable_and_save`,
+  `test_level_bed_surfaces_printer_error`, `test_home_surfaces_printer_error`,
+  `test_start_z_calibration_homes_and_travels`) asserted on `printer.sent`
+  immediately after calling the now-backgrounded methods, racing the new
+  worker thread. Fixed by waiting on `_wait(lambda: not ctl.busy)` first,
+  matching the file's existing async-wait convention.
+- Tests: `test_app` +4 (safe-cancel retreat contents; Home backgrounds and
+  guards other idle actions while busy; `set_temp` bounded-wait instead of
+  blocking) + the 4 fixed above → **251 tests.** Manual: drove the real
+  `Controller`/`SimPrinter` through Tk's event loop — `home()` returned in
+  ~1 ms instead of blocking for its `command_delay`; a `cancel()` mid-run
+  produced the retract/park/`M104 S0`/`M140 S0` sequence.
 
 ---
 

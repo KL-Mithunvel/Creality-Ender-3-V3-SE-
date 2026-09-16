@@ -500,12 +500,13 @@ class ControlPanel(ttk.Frame):
 
     def _refresh_buttons(self) -> None:
         running = self.c.running
+        busy = running or self.c.busy    # busy (C27): Home/Level Bed/Z-cal in flight
         self.btn_run.configure(
-            state=("disabled" if running or self.c.gcode_path is None else "normal")
+            state=("disabled" if busy or self.c.gcode_path is None else "normal")
         )
         for btn in (self.btn_pause, self.btn_resume, self.btn_cancel):
             btn.configure(state=("normal" if running else "disabled"))
-        idle_state = "disabled" if running else "normal"
+        idle_state = "disabled" if busy else "normal"
         self.btn_send.configure(state=idle_state)
         self.cmd_entry.configure(state=idle_state)
         self.btn_extrude.configure(state=idle_state)
@@ -513,7 +514,7 @@ class ControlPanel(ttk.Frame):
         self.btn_level.configure(state=idle_state)
         self.btn_zcal.configure(state=idle_state)
         self.btn_plan.configure(
-            state=("disabled" if running or self.c.gcode_path is None else "normal")
+            state=("disabled" if busy or self.c.gcode_path is None else "normal")
         )
 
     def _show_prompt(self, stage: str) -> None:

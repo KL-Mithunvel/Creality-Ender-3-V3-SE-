@@ -31,10 +31,10 @@ criteria, risks). Architecture and rules: `.CLAUDE/CLAUDE.md`. Keep all three in
       `ttk.Notebook` in the main window (one figure per tab, created lazily, redraw only
       when visible), stop the Animate tick when not playing, and profile the 3D
       `draw_idle` — consider redrawing 3D at a slower rate than 2D or blitting
-- [ ] Safety: a configurable safe-cancel routine (retract, lift, park, heaters off); run
-      Home/Level Bed/Z Calibrate off the Tk main thread so the panel stays clickable
-- [ ] Panel: Connect ↔ Disconnect toggle, guard double-connect; `on_phase` callback from
-      `insert_magnet` → log + phase badge + planned-path overlay during an insert
+- [ ] Panel: Connect ↔ Disconnect toggle, guard double-connect
+- [ ] Insert-phase polish: a log line per phase (not just the live-view label, C26) and a
+      planned-path overlay on the 2D view during an insert (the 2D layer currently just
+      freezes and the marker jumps to each phase's waypoint)
 - [ ] Streaming reliability for long real prints: `N` line numbers + checksum + resend buffer;
       opt-in `M420 S1` re-send after any streamed `G28`
 - [ ] GUI/UX pass (from the 2026-09-16 screenshot review): fill the empty left column, default
@@ -46,6 +46,13 @@ criteria, risks). Architecture and rules: `.CLAUDE/CLAUDE.md`. Keep all three in
 
 ## Done
 
+- [x] **Phase 1.14 — C27** (`project/BUILD_PLAN.md`) — safe-cancel + off-thread one-off
+      commands: `Controller.cancel()` now retracts/lifts/parks/turns heaters off (config
+      `cancel.heaters_off`) once the worker actually stops; `home()`/`level_bed()`/
+      `start_z_calibration()` run on a background thread (`_run_offline`) instead of
+      blocking the Tk main loop, guarded by a new `busy` property; `set_temp`/
+      `refresh_state` switched to a short bounded lock wait so they can't relocate the
+      same freeze onto themselves. 251 tests.
 - [x] **Phase 1.13 — C26** (`project/BUILD_PLAN.md`) — insert-phase live view:
       `insert_magnet(..., on_phase=)` fires once per phase with its exact nozzle-tip
       target; `Controller.in_insert`/`_on_insert_phase` feed a new `"phase"` event;
