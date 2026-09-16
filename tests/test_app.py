@@ -217,6 +217,52 @@ def test_healthy_dispenser_connects_when_optional(config):
     assert isinstance(ctl.dispenser, SimDispenser)
 
 
+# --- C28: connect/disconnect idempotency ------------------------------
+
+def test_double_connect_does_not_reopen_the_link(config):
+    """A second Connect click must not re-invoke `printer.connect()` - on a
+    real link that reopens an open port and can raise."""
+    ctl = Controller(SimPrinter(), SimDispenser(), config)
+    calls: list[None] = []
+    real_connect = ctl.printer.connect
+
+    def counting_connect() -> None:
+        calls.append(None)
+        real_connect()
+
+    ctl.printer.connect = counting_connect
+    ctl.connect()
+    ctl.poll_events()
+    ctl.connect()
+    assert calls == [None]
+    assert any(k == "log" and "already connected" in str(p) for k, p in ctl.poll_events())
+
+
+def test_disconnect_then_reconnect(config):
+    ctl = _ctl(config)
+    ctl.poll_events()
+    assert ctl.connected
+    ctl.disconnect()
+    assert not ctl.connected
+    assert not ctl.printer.state.connected
+    assert any(k == "log" and "disconnected" in str(p) for k, p in ctl.poll_events())
+    ctl.disconnect()          # idempotent
+    assert any(k == "log" and "already disconnected" in str(p) for k, p in ctl.poll_events())
+    ctl.connect()
+    assert ctl.connected
+
+
+def test_disconnect_refused_while_running(config):
+    ctl = _ctl(config, delay=0.03)
+    ctl.load_gcode(SAMPLE)
+    ctl.start_run()
+    assert _wait(lambda: ctl.running)
+    ctl.disconnect()
+    assert ctl.connected
+    assert any(k == "log" and "ignored" in str(p) for k, p in ctl.poll_events())
+    _pump_until(ctl, "done", answer="success")
+
+
 # --- C13: raw G-code entry ------------------------------------------
 
 def test_send_command_echoes_reply(config):

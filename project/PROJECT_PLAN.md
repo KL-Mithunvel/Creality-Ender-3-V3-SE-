@@ -5,7 +5,7 @@
 | Owner | kl mithunvel |
 | Created | 2026-09-09 |
 | Updated | 2026-09-16 |
-| Status | Phase 1 software complete through C27 (251 tests, see `project/BUILD_PLAN.md`); printer serial link + a real streamed print verified on hardware. Phase 0 (mechanical) and the magnet-flow hardware work not started. **Open design decision:** with a pole-above-nozzle offset the pocket must sit near a part edge (the C25 guard enforces it) — deployable pole or pocket constraint, see §6. |
+| Status | Phase 1 software complete through C28 (254 tests, see `project/BUILD_PLAN.md`); printer serial link + a real streamed print verified on hardware. Phase 0 (mechanical) and the magnet-flow hardware work not started. **Open design decision:** with a pole-above-nozzle offset the pocket must sit near a part edge (the C25 guard enforces it) — deployable pole or pocket constraint, see §6. |
 | Full brief | `.CLAUDE/CLAUDE.md` |
 | Task tracker | `TODO.md` |
 | Session history | `.CLAUDE/CLAUDE-LOG.md` |

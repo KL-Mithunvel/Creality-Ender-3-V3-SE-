@@ -63,12 +63,13 @@ involvement is acceptable at this stage.
 > (C21) + Phase 1.9 (C22) + Phase 1.10 (C23) + Phase 1.11 (C24) + Phase 1.12
 > (C25: nozzle-vs-part collision guard + Emergency Stop) + Phase 1.13 (C26:
 > insert-phase live view) + Phase 1.14 (C27: safe-cancel + off-thread
-> Home/Level Bed/Z-cal) done, plus mid-print temp control, a Level Bed
-> button, a run-report summary in the log, in-panel config editing, an
-> embedded live-print view showing 2D and equal-scale bed-aware 3D side by
-> side with a Global-bed/Local-part crop toggle, a guided Z-offset
-> calibration dialog, and a two-column panel that opens maximized and shows
-> what it's actually connected to — 251 tests** (`project/BUILD_PLAN.md`).
+> Home/Level Bed/Z-cal) + Phase 1.15 (C28: Connect/Disconnect toggle) done,
+> plus mid-print temp control, a Level Bed button, a run-report summary in
+> the log, in-panel config editing, an embedded live-print view showing 2D
+> and equal-scale bed-aware 3D side by side with a Global-bed/Local-part
+> crop toggle, a guided Z-offset calibration dialog, and a two-column panel
+> that opens maximized and shows what it's actually connected to —
+> 254 tests** (`project/BUILD_PLAN.md`).
 > One root `python main.py` (mode by flag), `gcode/toolpath.py`, shared
 > `sequences/geometry.py`, a matplotlib toolpath + insert-motion preview
 > (`main.py --preview`), a "Plan magnet insert…" dialog that saves
@@ -364,7 +365,9 @@ hardware attached.
 - `dispenser_optional=True` (used by `--hardware`): if `dispenser.connect()` raises a
   `DispenserError`, `connect()` logs it, drops `self.dispenser` to `None`, and does
   not raise — the run continues printer-only. Default `False` keeps it strict.
-- Actions: `connect`, `load_gcode`, `jog`, `home`, `level_bed` (`G28`→`G29`→
+- Actions: `connect` (idempotent, C28 — a no-op while already connected and
+  not `estopped`), `disconnect` (C28 — idempotent, refused while
+  `running`/`busy`), `load_gcode`, `jog`, `home`, `level_bed` (`G28`→`G29`→
   `M420 S1`→`M500`), `send_command` (raw G-code line), `extrude` (mm+feed,
   negative = retract), `start_z_calibration` (`G28` then travel to
   `zcal.{x,y,start_z}`), `nudge_z` (fine relative Z move at `zcal.feed`),
@@ -425,7 +428,11 @@ hardware attached.
   Debt). Every idle-only action's guard is `if self.running or self._busy:`.
 
 ### `ui/panel.py` — `ControlPanel` + `run_gui(controller)`
-- Thin Tkinter view over a `Controller`. Connect, load G-code, run/pause/resume/cancel,
+- Thin Tkinter view over a `Controller`. `self.btn_connect` (C28) is a
+  Connect ↔ Disconnect toggle — `_toggle_connect` dispatches on
+  `Controller.connected`, and its label/enabled-state are refreshed every
+  `_refresh_buttons()` poll (disabled while `busy`, same as the other
+  idle-only controls). Load G-code, run/pause/resume/cancel,
   a red **EMERGENCY STOP** button at the top right (`self.btn_estop`, a plain
   `tk.Button` because the Windows ttk theme ignores background colours;
   always enabled, no confirm dialog, calls `Controller.emergency_stop`),
@@ -733,9 +740,16 @@ parks, magnet dispensed, controlled press + lateral shear run, print resumes and
   (`_LOCK_WAIT_S = 0.3` s) so they can't relocate the same freeze onto
   themselves — long enough to ride out the streaming loop's normal brief
   per-line hold, short enough to never be perceptible.
-- **`Controller.connect` is not idempotent and there is no Disconnect.** A
-  second Connect click on a real link reopens an open port; the exception
-  escapes the Tk callback and nothing shows in the panel.
+- ~~`Controller.connect` is not idempotent and there is no Disconnect~~ —
+  **fixed in C28**. `connect()` is now a no-op (logs "already connected")
+  when already connected and not `estopped` — the `estopped` exception
+  matters because `emergency_stop()` never flips `_connected` off, so
+  Connect must still work there to clear `estopped`, without re-opening the
+  port. New `disconnect()` (idempotent, refused while `running`/`busy`)
+  closes the printer and dispenser links independently (one failing doesn't
+  block the other) and clears `_connected`. `ui/panel.py`'s single Connect
+  button is now a Connect ↔ Disconnect toggle (`_toggle_connect`, label
+  refreshed every poll from `Controller.connected`).
 - ~~The insert sequence is invisible while it runs~~ — **fixed in C26**
   (`insert_magnet(..., on_phase=)`, `Controller.in_insert`/`_on_insert_phase`,
   `ui/panel.py._sync_live_view`, see Key Modules). Still open: no log line per

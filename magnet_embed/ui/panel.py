@@ -110,7 +110,8 @@ class ControlPanel(ttk.Frame):
 
         top = ttk.Frame(b)
         top.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(0, 6))
-        ttk.Button(top, text="Connect", command=self.c.connect).pack(side="left")
+        self.btn_connect = ttk.Button(top, text="Connect", command=self._toggle_connect)
+        self.btn_connect.pack(side="left")
         self.status = ttk.Label(top, text="not connected")
         self.status.pack(side="left", padx=8)
         self.target_lbl = ttk.Label(top, text=f"({self.c.link_summary})", foreground="gray")
@@ -313,6 +314,12 @@ class ControlPanel(ttk.Frame):
 
     # --- actions -------------------------------------------------
 
+    def _toggle_connect(self) -> None:
+        if self.c.connected:
+            self.c.disconnect()
+        else:
+            self.c.connect()
+
     def _filament(self, sign: int) -> None:
         self.c.extrude(sign * _to_float(self.fil_mm, 5.0), _to_float(self.fil_feed, 300.0))
 
@@ -501,6 +508,10 @@ class ControlPanel(ttk.Frame):
     def _refresh_buttons(self) -> None:
         running = self.c.running
         busy = running or self.c.busy    # busy (C27): Home/Level Bed/Z-cal in flight
+        self.btn_connect.configure(
+            text="Disconnect" if self.c.connected else "Connect",
+            state=("disabled" if busy else "normal"),
+        )
         self.btn_run.configure(
             state=("disabled" if busy or self.c.gcode_path is None else "normal")
         )

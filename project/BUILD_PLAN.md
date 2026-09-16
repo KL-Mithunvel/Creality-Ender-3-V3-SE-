@@ -9,7 +9,7 @@ chunks. Each chunk: build → `pytest` green → stage → commit.
 |--|--|
 | Owner | kl mithunvel |
 | Created | 2026-09-09 |
-| Status | **C1–C8 + Phase 1.6 (C13–C19) + C20 + C21 + C22 + C23 + C24 + C25 (collision guard + Emergency Stop) + C26 (insert-phase live view) + C27 (safe-cancel + off-thread Home/Level Bed/Z-cal) done — 251 tests.** One root `python main.py` (mode by flag, opens maximized), bring-your-own-G-code, toolpath + insert-motion preview, "Plan magnet insert…" dialog (now with an embedded live preview of the insert motion), a two-column panel (jog/temperature/filament on the left, the live-print view + send-G-code + log on the right, both stretching to fill a maximized window) with a mode/port indicator, an embedded live-print view (2D current-layer + isometric 3D shown side by side, with a Global-bed/Local-part crop toggle and tight equal-scale axes — a path that grows as the nozzle passes through it, and tracks the actual insert-motion waypoints instead of freezing during a magnet insert — plus a nozzle marker and current-step G-code text) during a run, and a guided Z-offset calibration dialog. Magnet-flow hardware smoke test still pending the applicator build; the Z-calibration workflow is itself untested on real hardware — see Known Technical Debt. |
+| Status | **C1–C8 + Phase 1.6 (C13–C19) + C20 + C21 + C22 + C23 + C24 + C25 (collision guard + Emergency Stop) + C26 (insert-phase live view) + C27 (safe-cancel + off-thread Home/Level Bed/Z-cal) + C28 (Connect/Disconnect toggle) done — 254 tests.** One root `python main.py` (mode by flag, opens maximized), bring-your-own-G-code, toolpath + insert-motion preview, "Plan magnet insert…" dialog (now with an embedded live preview of the insert motion), a two-column panel (jog/temperature/filament on the left, the live-print view + send-G-code + log on the right, both stretching to fill a maximized window) with a mode/port indicator, an embedded live-print view (2D current-layer + isometric 3D shown side by side, with a Global-bed/Local-part crop toggle and tight equal-scale axes — a path that grows as the nozzle passes through it, and tracks the actual insert-motion waypoints instead of freezing during a magnet insert — plus a nozzle marker and current-step G-code text) during a run, and a guided Z-offset calibration dialog. Magnet-flow hardware smoke test still pending the applicator build; the Z-calibration workflow is itself untested on real hardware — see Known Technical Debt. |
 | Overall plan | `project/PROJECT_PLAN.md` |
 | Architecture / rules | `.CLAUDE/CLAUDE.md` |
 
@@ -1172,6 +1172,43 @@ the panel, including a future stop button, was clickable meanwhile.
   `Controller`/`SimPrinter` through Tk's event loop — `home()` returned in
   ~1 ms instead of blocking for its `command_delay`; a `cancel()` mid-run
   produced the retract/park/`M104 S0`/`M140 S0` sequence.
+
+---
+
+## Phase 1.15 — Connect / Disconnect toggle
+
+### C28 — `Controller.connect()` idempotent; new `disconnect()`; panel toggle  ✅
+
+**Why.** `Controller.connect` was not idempotent (a second real click reopens
+an open port and the exception escapes the Tk callback) and there was no
+Disconnect at all — both flagged in the 2026-09-16 review's TODO list.
+
+**Done:**
+- `app.Controller.connect()` — now a no-op (`"already connected"` log) when
+  `self._connected and not self._estopped`; the whole body is wrapped in
+  `try/except (PrinterConnectionError, PrinterError, AckTimeout,
+  ResendRequested)` → `error` event (previously the only action with none at
+  all). The `estopped` carve-out matters: `emergency_stop()` never clears
+  `_connected` (the port itself is still open), so a post-e-stop Connect
+  click must still run — just skip re-opening the printer/dispenser link,
+  only clear `estopped` and re-emit state. Caught by
+  `test_reconnect_clears_estopped`, an existing C25 test, when the first
+  idempotency pass broke it.
+- New `disconnect()` — same idempotency/`running`-or-`busy` guard,
+  `printer.disconnect()` then `dispenser.disconnect()` independently
+  try/excepted (a dispenser failure doesn't block the printer from
+  disconnecting; both link types already document `disconnect()` as safe to
+  call when not connected).
+- `ui/panel.py` — the single "Connect" button is now `self.btn_connect`, a
+  Connect ↔ Disconnect toggle (`_toggle_connect`, dispatches on
+  `Controller.connected`); its label and enabled-state are refreshed in
+  `_refresh_buttons()` every poll, disabled while `busy` like the other
+  idle-only controls.
+- Tests: `test_app` +3 (double connect doesn't re-invoke `printer.connect()`;
+  disconnect flips `connected` and is idempotent; disconnect refused while
+  running) → **254 tests.** Manual: drove the real `ControlPanel` through
+  Tk's event loop — the button read "Connect" → "Disconnect" → "Connect" as
+  `_toggle_connect` was invoked, `Controller.connected` tracking exactly.
 
 ---
 

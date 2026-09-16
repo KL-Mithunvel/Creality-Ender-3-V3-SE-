@@ -31,7 +31,6 @@ criteria, risks). Architecture and rules: `.CLAUDE/CLAUDE.md`. Keep all three in
       `ttk.Notebook` in the main window (one figure per tab, created lazily, redraw only
       when visible), stop the Animate tick when not playing, and profile the 3D
       `draw_idle` — consider redrawing 3D at a slower rate than 2D or blitting
-- [ ] Panel: Connect ↔ Disconnect toggle, guard double-connect
 - [ ] Insert-phase polish: a log line per phase (not just the live-view label, C26) and a
       planned-path overlay on the 2D view during an insert (the 2D layer currently just
       freezes and the marker jumps to each phase's waypoint)
@@ -46,6 +45,11 @@ criteria, risks). Architecture and rules: `.CLAUDE/CLAUDE.md`. Keep all three in
 
 ## Done
 
+- [x] **Phase 1.15 — C28** (`project/BUILD_PLAN.md`) — Connect/Disconnect: `Controller.connect()`
+      is idempotent (a no-op while already connected and not `estopped`, so it still clears
+      `estopped` after a power-cycle without reopening the port); new `disconnect()`
+      (idempotent, refused while running/busy); the panel's Connect button is now a
+      Connect ↔ Disconnect toggle. 254 tests.
 - [x] **Phase 1.14 — C27** (`project/BUILD_PLAN.md`) — safe-cancel + off-thread one-off
       commands: `Controller.cancel()` now retracts/lifts/parks/turns heaters off (config
       `cancel.heaters_off`) once the worker actually stops; `home()`/`level_bed()`/

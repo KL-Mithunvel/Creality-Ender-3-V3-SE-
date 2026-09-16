@@ -22,6 +22,7 @@ from .config import load_config, save_local_override
 from .exceptions import (
     AckTimeout,
     DispenserError,
+    PrinterConnectionError,
     PrinterError,
     ResendRequested,
     SequenceAborted,
@@ -172,23 +173,62 @@ class Controller:
     # --- actions (call from the UI / main thread) -----------------
 
     def connect(self) -> None:
-        self.printer.connect()
-        if self.dispenser is not None:
+        """Open the printer (and dispenser, if any) link. Idempotent - a
+        second call while already connected (and not `estopped`) just logs,
+        instead of reopening an already-open port (`PrinterConnectionError`
+        or worse on a real link) and throwing an unhandled exception out of
+        the Tk callback. After an emergency stop `_connected` is still True
+        (the port was never closed) but `estopped` is - Connect must still
+        work there to clear it, without trying to reopen the port again."""
+        if self._connected and not self._estopped:
+            self._emit("log", "already connected")
+            return
+        if self.running or self._busy:
+            self._emit("log", "connect ignored - busy")
+            return
+        if not self._connected:
             try:
-                self.dispenser.connect()
-            except DispenserError as exc:
-                if not self.dispenser_optional:
-                    raise
-                self._emit(
-                    "log",
-                    f"dispenser unavailable ({exc}); continuing printer-only - "
-                    "magnet inserts will fall back to the operator prompt",
-                )
-                self.dispenser = None
+                self.printer.connect()
+            except (PrinterConnectionError, PrinterError, AckTimeout, ResendRequested) as exc:
+                self._emit("error", f"{type(exc).__name__}: {exc}")
+                return
+            if self.dispenser is not None:
+                try:
+                    self.dispenser.connect()
+                except DispenserError as exc:
+                    if not self.dispenser_optional:
+                        raise
+                    self._emit(
+                        "log",
+                        f"dispenser unavailable ({exc}); continuing printer-only - "
+                        "magnet inserts will fall back to the operator prompt",
+                    )
+                    self.dispenser = None
         self._connected = True
         self._estopped = False
         self._emit("log", "connected")
         self._emit_state()
+
+    def disconnect(self) -> None:
+        """Close the printer (and dispenser, if any) link. Idempotent; refused
+        while a run or a background one-off command is active."""
+        if not self._connected:
+            self._emit("log", "already disconnected")
+            return
+        if self.running or self._busy:
+            self._emit("log", "disconnect ignored - a run or action is active")
+            return
+        try:
+            self.printer.disconnect()
+        except Exception as exc:  # noqa: BLE001 - never block a disconnect on this
+            self._emit("error", f"disconnect: {type(exc).__name__}: {exc}")
+        if self.dispenser is not None:
+            try:
+                self.dispenser.disconnect()
+            except Exception as exc:  # noqa: BLE001 - ditto, and the printer already closed
+                self._emit("error", f"disconnect (dispenser): {type(exc).__name__}: {exc}")
+        self._connected = False
+        self._emit("log", "disconnected")
 
     def load_gcode(self, path: str | Path) -> None:
         if self.running:
