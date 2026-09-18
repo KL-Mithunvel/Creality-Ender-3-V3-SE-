@@ -98,6 +98,7 @@ the first `--printer` / `--hardware` run on a given machine.
 | `project/BUILD_PLAN.md` | Software build broken into commit-sized chunks (C1–C8, Phase 1.6 C13–C19, Phase 1.7 C20, Phase 1.8 C21, Phase 1.9 C22, Phase 1.10 C23, Phase 1.11 C24, Phase 1.12 C25, Phase 1.13 C26, Phase 1.14 C27, Phase 1.15 C28, Phase 1.16 C29, Phase 1.17 C30, Phase 1.18 C31) + protocol notes |
 | `project/RESEARCH.md` | Prior art & similar projects survey (OctoPNP, in-situ-placement papers, host-control patterns) + how each informs the design |
 | `docs/INVENTION_DISCLOSURE_DRAFT.md` | Working draft of the patent disclosure form (for inventor + attorney review) |
+| `docs/PRIOR_ART_PATENT_SEARCH.md` | Informal patent / prior-art search (2026-09-18) feeding Q5/Q19 of the draft — closest-first table, exclusions, what was not found, agent recommendations |
 | `TODO.md` | Task tracker (mirrors the plan checklists) |
 | `.CLAUDE/CLAUDE-LOG.md` | Session-by-session history |
 

@@ -13,7 +13,13 @@ criteria, risks). Architecture and rules: `.CLAUDE/CLAUDE.md`. Keep all three in
       that `M851`/`M500` actually take effect (measure the printer's real starting M851 Z
       value once and set `zcal.probe_z_offset` in `config.local.yaml` before the first run)
 - [ ] Patent: fill the `[INVENTORS TO COMPLETE]` sections of `docs/INVENTION_DISCLOSURE_DRAFT.md`,
-      run a prior-art search with the K&K agent, confirm college IP policy
+      have the K&K agent run the formal patent search (informal one done 2026-09-18 —
+      `docs/PRIOR_ART_PATENT_SEARCH.md`; the agent must claim-chart Stratasys
+      US 8,070,473 B2 / EP 2 231 375 B1 and check for an Indian family member), confirm
+      college IP policy
+- [ ] Bench (from the 2026-09-18 search): measure magnet-to-nozzle pull at the real tool
+      offset (many "brass" nozzles are ferromagnetic) and keep strong magnets away from the
+      patterned magnetic bed plate (`project/PROJECT_PLAN.md` §7)
 - [ ] Hardware decision (from the C25 guard): with a pole-above-nozzle offset the pocket
       must sit within the X/Y offset of a part edge — decide deployable pole vs.
       pocket-near-edge design (`project/PROJECT_PLAN.md` §6, disclosure Q11). Also measure
@@ -46,6 +52,11 @@ criteria, risks). Architecture and rules: `.CLAUDE/CLAUDE.md`. Keep all three in
 
 ## Done
 
+- [x] Informal prior-art / patent search (2026-09-18): `docs/PRIOR_ART_PATENT_SEARCH.md` —
+      Google Patents records read for 14 candidates; closest: Stratasys embedded-inserts
+      family (US 8,070,473 B2 / US 7,917,243 B2 / EP 2 231 375 B1); EmGi magnet-insertion
+      hand tool noted against novelty item 4; disclosure Q5/Q6/Q9/Q19/Q27 updated. Session
+      log backfilled for C26–C31 in the same commit.
 - [x] Patent draft refresh (2026-09-18): `docs/INVENTION_DISCLOSURE_DRAFT.md` brought
       to the C31 state — test counts 225/245 -> 262; Q7 gained B12-B15 (emergency stop,
       safe cancel, run transcript, opt-in numbered streaming) and B4/B5/B7 reworded for the

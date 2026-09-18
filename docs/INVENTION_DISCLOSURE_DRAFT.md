@@ -4,7 +4,7 @@
 |--|--|
 | **Form** | Khurana & Khurana "Inventive Disclosure – Confidential" — `docs/Invention DisclosureForm -Khurana & Khurana.docx` (27 questions). This Markdown mirrors the form one-to-one so answers can be reviewed in git and then pasted into the Word file. |
 | **Status** | **DRAFT** for the inventors, the college guide and the K&K patent agent to review and correct. Claude drafted the technical answers from the project docs and code. |
-| **Last updated** | 2026-09-18 — brought to the state of software chunk C31 (262 automated tests). Previous refresh 2026-09-16 (C24 → C25). |
+| **Last updated** | 2026-09-18 — brought to the state of software chunk C31 (262 automated tests) and cross-referenced to the informal patent search of the same day (`docs/PRIOR_ART_PATENT_SEARCH.md`). Previous refresh 2026-09-16 (C24 → C25). |
 | **Source material** | `.CLAUDE/CLAUDE.md` (technical brief), `project/PROJECT_PLAN.md`, `project/BUILD_PLAN.md`, `project/HOW_IT_WORKS.md`, `project/RESEARCH.md`, `magnet_embed/` (code), `magnet_embed/config.yaml` (defaults). |
 
 **Placeholder legend** — every marker below needs a human before the form is submitted:
@@ -180,6 +180,40 @@ search must be run by the K&K agent, see Q19. Full notes and links in
 - Maker/vendor guides on embedding hardware (Markforged; MLC-CAD; forums) — the
   pocket + pause + seal concept, pocket oversize ~0.1–0.3 mm, 2–3 cap layers.
 
+**Patent references — informal search, 2026-09-18** (full table, overlap /
+difference analysis and sources in **`docs/PRIOR_ART_PATENT_SEARCH.md`**;
+Google Patents records read, not the full specifications):
+
+- **US 8,070,473 B2 (Stratasys, 2008; active to 2029-06-26) + EP 2 231 375 B1
+  (to 2028-12-12)** — *System for building three-dimensional objects containing
+  embedded inserts.* Claim 1: controller + head assembly + an **insert
+  placement apparatus** placing inserts in the formed layers per build-sequence
+  data. Embodiments: magazine-fed robotic arm with vacuum effector (build
+  pauses); a **telescoping arm on the extrusion head**; a **tape-dispensing
+  unit on the head whose roller presses inserts into the part during
+  deposition**. **The closest patent — must be claim-charted (§6 of the search
+  file). Indian family membership unknown.**
+- **US 7,917,243 B2 (Stratasys, 2008; to 2029-08-10)** — sibling method:
+  generate an unfilled region at the insert location in the build data and
+  **pause times** for placing the insert, "manually or in an automated manner".
+- **US 9,539,762 B2 (Markforged, 2017)** — pause, remove the build platform on a
+  kinematic coupling, insert and glue components, return and resume.
+- **US 11,981,094 B2 (Honeywell, 2024)** and **US 10,748,867 B2 (Univ. of
+  Texas, 2020)** — pause-insert-resume of electronics as a claimed step inside
+  a larger method; manual or external pick-and-place; no placement tool on the
+  printer.
+- **Non-patent, new:** EmGi's *Magnet Insertion Tool* v1/v2 (2024) — a
+  hand-held, **self-reloading magazine** feeding one magnet to a **magnetic
+  tip**, trigger release, one tool per polarity — the closest art to the
+  feeder + holding-pole idea, but hand-held and not integrated with the print;
+  and *Development of Integrated 3D Printing and Automated Embedding System*
+  (Mechatronika 2024, IEEE) — automated embedding for resin printing with
+  external SMT placement equipment.
+- **Not found** (informally): a G-code comment sentinel driving a host insert
+  routine on an unmodified printer; printer-motion press + lateral shear
+  release from a passive magnetic holder; an offset-tool collision guard from
+  the already-printed toolpath; any Indian filing; any OctoPNP patent.
+
 `[AGENT]` — **patent** search (Espacenet / Google Patents / Indian Patent Advanced
 Search / WIPO PATENTSCOPE) for: automated insertion during additive manufacturing;
 magnetic component placement heads; marker/sentinel-driven print interruption;
@@ -204,6 +238,15 @@ the reaction feature), so the only added actuator is a single-servo **feeder**;
 and the file still prints normally from SD; and (iii) a host-side tool-offset
 transform with a damage guard that knows the shape of the part printed so far,
 since the firmware is untouched and cannot protect the part itself.
+
+**Caveat from the informal patent search (2026-09-18).** The *general* concept
+of an automated, controller-driven insert-placement apparatus on a layer-based
+printer — including one mounted on the extrusion head — is already claimed by
+Stratasys (US 8,070,473 B2 / EP 2 231 375 B1, Q5). The gap this project fills is
+therefore narrower than "automated insertion": it is automated insertion **with
+no placement actuator at all** on a **stock consumer printer**, driven by an
+**inert marker** in ordinary G-code. The agent must confirm that framing
+against the Stratasys claims.
 
 ## Q7. Components of the Invention
 
@@ -343,6 +386,18 @@ Candidate novel aspects (for the agent to sharpen into claims):
 *Not claimed as novel* (standard host features, listed in Q7 for completeness):
 emergency stop, safe cancel, run logging, line-numbered streaming, and the
 progress-derived live view — OctoPrint and Printrun have equivalents.
+
+*Caveats from the informal patent search (2026-09-18,
+`docs/PRIOR_ART_PATENT_SEARCH.md`):* item **4** on its own is weakened by
+EmGi's hand-held magnet-insertion tool (magazine + magnetic tip + one tool per
+polarity, public since 2024) — keep it as a dependent feature, not an
+independent claim. Items **1** and **2** must be read against the
+tape-dispensing embodiment of US 8,070,473 B2, in which a roller on the
+extrusion head presses inserts from a tape into the part during deposition;
+the distinction to argue is that our applicator has no drive of its own for
+placement — the press *and* the release are commanded printer moves, and the
+release is a lateral shear against the pocket wall, not a roller or a switched
+gripper. Items **3**, **7**, **8** and **9** found no counterpart.
 
 ## Q10. Advantages / improvements over existing methods
 
@@ -620,11 +675,21 @@ Q26 — TRL 3, partial.)
 
 *(Databases / references used and results.)*
 
-Informal web/literature review is done — see **`project/RESEARCH.md`** (academic
-papers, OctoPNP, host-control docs, maker practice) and the notes in Q5. It found
-the IEEE 2021 / OctoPNP line of work as the closest published art. **No formal
-patent-database search has been done** (Espacenet / Google Patents / Indian Patent
-Advanced Search / WIPO PATENTSCOPE) — the K&K agent should run it. Table to fill:
+Two informal searches are done, both by the inventors' side, neither a formal
+opinion:
+
+- **Literature / projects (2026-09-09)** — `project/RESEARCH.md` (academic
+  papers, OctoPNP, host-control docs, maker practice); closest published art:
+  the IEEE 2021 / OctoPNP line of work.
+- **Patents (2026-09-18)** — `docs/PRIOR_ART_PATENT_SEARCH.md`: a general web
+  search engine plus the Google Patents record of each candidate (abstract,
+  claim 1, embodiments, status). Closest patent art: the Stratasys embedded-
+  inserts family (US 8,070,473 B2 / US 7,917,243 B2 / EP 2 231 375 B1).
+  **Not used:** Espacenet, WIPO PATENTSCOPE, USPTO PatFT/PPUBS classification
+  search, Indian InPASS; no citation-tree walk. The K&K agent should run the
+  formal search (recommended classes and steps in §6 of that file).
+
+Table (rows 1–7 from the informal searches; row 8 for the agent):
 
 | S.no | Reference | Existing idea | Our invention |
 |------|-----------|---------------|---------------|
@@ -633,7 +698,9 @@ Advanced Search / WIPO PATENTSCOPE) — the K&K agent should run it. Table to fi
 | 3 | OctoPrint `@pause` / GCodeSystemCommands | in-stream marker triggers a host action / external script | same mechanism, but a **`;` comment** (SD-safe) carrying **placement coordinates**, driving a full park → place → shear → resume routine |
 | 4 | tool-changer projects (Jubilee, E3D) | multiple toolheads on one motion system, often needs firmware support | one **passive** feeder tool; placement by existing motion; no firmware change |
 | 5 | OctoPrint / Printrun hosts | emergency stop, cancel, G-code viewer driven from sent lines | not claimed (Q9); reused as the safety and display layer around the insert |
-| 6 | `[AGENT — patent search results]` | | |
+| 6 | **US 8,070,473 B2 / US 7,917,243 B2 / EP 2 231 375 B1** (Stratasys, 2008 — embedded inserts) | controller-driven **insert placement apparatus** (magazine + vacuum robotic arm; telescoping arm on the head; tape + roller on the head) placing inserts into CAD-generated pockets per build data, with pause times in the build sequence | **no placement actuator** — single-magnet feed only; press and release are **printer moves**; passive magnetic hold + lateral shear; **comment marker** in ordinary sliced G-code on an unmodified consumer printer; toolpath-derived damage guard |
+| 7 | EmGi "Magnet Insertion Tool" v1/v2 (2024, Printables/MakerWorld) | hand tool: self-reloading magazine → magnetic tip holds one magnet → trigger release; one tool per polarity | same feeder idea but **carriage-mounted**, dispensed by a servo on command, seated and released by the **printer's motion** at a marker, inside the print |
+| 8 | `[AGENT — formal patent search results]` | | |
 
 ## Q20. Would a person of ordinary skill have arrived at this?
 
@@ -791,6 +858,13 @@ Not yet TRL 4 (lab validation of the whole system).
   of the printed layers (an L-shaped printed cross-section is treated as its
   enclosing rectangle — conservative), and the applicator body itself is not
   modelled, only the nozzle tip.
+- Two engineering risks surfaced by the 2026-09-18 search (Hackaday,
+  2026-06-04) and added to `project/PROJECT_PLAN.md` §7: many "brass" nozzles
+  are ferromagnetic enough for a magnet to jump to the nozzle (our pole is
+  30 mm from the nozzle by default — measure the pull at the real offset), and
+  a strong neodymium magnet near a modern patterned magnetic bed plate can
+  re-polarise the plate. Neither affects the claims; both affect the bench
+  plan.
 - Unverified on the stock firmware, to be bench-tested before the claims rely
   on them: whether `M112` is honoured mid-move (`EMERGENCY_PARSER`), the
   line-number/checksum resend format, and `M851`/`M500` for the Z-offset
@@ -825,7 +899,10 @@ Every placeholder in this draft, gathered in one place. Tick as they are resolve
 
 **K&K agent**
 
-- [ ] Q5 / Q19 — formal patent-database search; fill row 6 of the Q19 table
+- [ ] Q5 / Q19 — formal patent-database search; fill row 8 of the Q19 table
+- [ ] **Claim-chart US 8,070,473 B2 / EP 2 231 375 B1 (Stratasys) against our
+      system and check for an Indian family member** — freedom to operate and
+      novelty framing both hinge on it (`docs/PRIOR_ART_PATENT_SEARCH.md` §6)
 - [ ] Q10 — verify the advantages against the closest patents found
 - [ ] Q18 — draft the claims from the directions given
 - [ ] Q23 — market data with sources

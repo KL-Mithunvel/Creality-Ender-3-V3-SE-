@@ -281,6 +281,8 @@ the printer-driven press + lateral shear on real parts.
 | Holding pole stronger than pocket retention | Shear drags the magnet back out | Press-fit pocket + weak pole + optional adhesive; lateral (not vertical) shear; tune on coupons (§8) |
 | Magazine clumps, dispenses 0 or 2 | Missed or doubled insert | Escapement isolates one; `DISPENSE`→`ERR` if the servo can't complete; operator check catches it |
 | Magnet snaps to the steel flex plate | Magnet lost / plate lifts | Pole holds the magnet until shear; measure safe approach distance in Phase 0/2 |
+| Magnet jumps from the pole to a ferromagnetic nozzle (many "brass" nozzles are magnetic — Hackaday 2026-06-04) | Magnet lost on the hotend, possible nozzle contact | Measure the pull at the real tool offset in Phase 2 bench test 2.7; increase the offset or shield the pole side if needed |
+| Strong magnet near the patterned magnetic bed plate re-polarises the plate | Plate no longer holds the print sheet evenly | Keep magazine and pole clear of the plate; test with a spare sheet first (Phase 0 step 6) |
 | Tool offset target out of envelope | Bad move / crash | Host damage guard aborts the sequence, print stays paused (Dev Rule 12) |
 | Nozzle driven into the printed part during PRESS/SHEAR (pole above nozzle) | Nozzle-through-part crash | C25 guard refuses it in the dialog, preview and run; pocket must sit near a part edge or the pole must deploy (§6) |
 | Runaway during a move / insert | Damage to printer or part | Red EMERGENCY STOP (`M112`, no lock, no idle guard); power-cycle + reconnect afterwards. `EMERGENCY_PARSER` on the stock board unverified |

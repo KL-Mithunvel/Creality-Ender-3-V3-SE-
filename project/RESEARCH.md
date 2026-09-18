@@ -7,8 +7,10 @@ official docs, academic papers, maker forums).
 
 > `project/BUILD_PLAN.md` has the terse, protocol-focused reference list; this file
 > is the fuller version. The patent draft (`docs/INVENTION_DISCLOSURE_DRAFT.md`)
-> pulls its prior-art section from here — a **formal patent-database search is still
-> owed** (that's for the K&K agent), this is background only.
+> pulls its prior-art section from here and from **`docs/PRIOR_ART_PATENT_SEARCH.md`**
+> (informal patent search, 2026-09-18 — closest: the Stratasys embedded-inserts
+> family US 8,070,473 B2 / EP 2 231 375 B1). A **formal patent-database search is
+> still owed** (that's for the K&K agent); both files are background only.
 
 ---
 
@@ -187,6 +189,15 @@ From maker forums, Printables, vendor guides (Markforged, MLC-CAD, Prusa/Bambu f
 - **Neodymium heat:** the cap-layer reheat is brief; N-grade working limit ≈ 80 °C, so
   a ~200 °C nozzle passing above is usually fine but repeated exposure can weaken it →
   move to N42SH/UH grade if strength drops.
+- **Ferromagnetic nozzles and patterned bed plates** (Hackaday, 2026-06-04, added
+  2026-09-18): many "brass" nozzles are magnetic enough for a loose magnet to jump to
+  the nozzle, and a strong neodymium magnet near a modern alternating-pole magnetic
+  bed plate can re-polarise the plate. → measure the magnet-to-nozzle pull at the real
+  tool offset during the Phase 2 bench tests; keep the magazine and the pole clear of
+  the plate; the "keep the pole holding the magnet until shear" rule stands.
+- **Hand-held magnet placers exist** (EmGi "Magnet Insertion Tool" v1/v2, 2024 —
+  magazine + magnetic tip + trigger release): a useful reference for the escapement and
+  tip geometry of A2/A4, and prior art the disclosure now cites (Q5, Q19).
 
 Sources: markforged.com/resources/blog/embedding-components-in-3d-printed-parts ·
 mlc-cad.com/3d-printing-help-center/how-to-pause-printing-to-embed-hardware ·

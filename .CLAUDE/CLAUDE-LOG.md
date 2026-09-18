@@ -915,6 +915,113 @@ smoke test.
   window/performance consolidation, UX pass, hardware bench-test of `M112`
   (`EMERGENCY_PARSER` on the stock board unverified).
 
+## 2026-09-16 (cont.) — C26: insert-phase live view *(backfilled 2026-09-18 from `project/BUILD_PLAN.md` + git; commit 3f49ca4, 09:56)*
+
+- Problem from the 2026-09-16 review: the panel's live view derives the nozzle
+  position from G-code line progress, which freezes at the sentinel for the
+  whole magnet insert.
+- `sequences/insert_magnet.py` — new keyword-only `on_phase(phase, position)`
+  callback, fired once per phase (`PARK`, `DISPENSE`, `APPROACH`, `PRESS`,
+  `SHEAR`, `LIFT`, `CONFIRM`, `RESUME`) right before that phase's `_send`,
+  with the exact target already computed for it (`None` for the two
+  non-motion phases); re-fires on every retry iteration except `PARK`.
+- `app.Controller` — `in_insert` property; `_on_sentinel` passes
+  `on_phase=self._on_insert_phase`, which emits a new `"phase"` event on the
+  existing queue. `viz/toolpath_fig.update_live_3d_marker` factored out so the
+  3D marker can move without touching the growing path. `ui/panel.py
+  _sync_live_view` follows the phase position while `in_insert`, keeps the 2D
+  layer and 3D path frozen at the sentinel, shows the phase as the current
+  step; reverts to line-progress the moment `in_insert` is false.
+- Tests 245 → 248 (`test_insert_magnet` +2, `test_app` +1). Manual: drove the
+  real panel through Tk's event loop across a sentinel insert; label tracked
+  PARK → DISPENSE → APPROACH → PRESS → CONFIRM, no draw exceptions.
+
+## 2026-09-16 (cont.) — C27: safe-cancel retreat; Home / Level Bed / Z-cal off the main thread *(backfilled 2026-09-18; commit a46bb79, 10:13)*
+
+- `Controller.cancel()` now spawns `_safe_cancel_retreat`: bounded
+  `worker.join`, skip (with a log line) if the worker is still alive — e.g.
+  blocked in an insert's operator prompt — otherwise, unless `estopped`,
+  retract, lift to `min(z + park.safe_z_lift_mm, machine.z_max)`, park at
+  `park.{x,y}`, and `M104 S0`/`M140 S0` if new `config.cancel.heaters_off`
+  (default `true`).
+- New `_busy` flag / `busy` property and `_run_offline(fn)`; `home()`,
+  `level_bed()`, `start_z_calibration()` run on a daemon thread under
+  `_printer_lock` instead of blocking Tk; every idle-only guard widened to
+  `running or _busy`. `nudge_z`/`save_z_offset` stay synchronous on purpose.
+- `set_temp`/`refresh_state` switched to a bounded `acquire(timeout=0.3)` so a
+  long background `G28`/`G29` cannot relocate the freeze onto them; suite run
+  3× with no flakes.
+- Regression found and fixed: four existing tests asserted on `printer.sent`
+  right after the now-backgrounded calls; they wait on `not ctl.busy` first.
+- Tests 248 → 251. Manual: `home()` returned in ~1 ms; cancel mid-run produced
+  the retract/park/heaters-off sequence.
+
+## 2026-09-16 (cont.) — C28: idempotent connect + Disconnect toggle *(backfilled 2026-09-18; commit 8f6b352, 10:20)*
+
+- `Controller.connect()` is a no-op (logs "already connected") when
+  `_connected and not _estopped`; the `estopped` carve-out keeps a post-e-stop
+  Connect working (it only clears the flag, never reopens the port) — caught
+  by the existing C25 test `test_reconnect_clears_estopped` when the first
+  pass broke it. Whole body now try/excepts link errors into an `error` event.
+- New `disconnect()` — idempotent, refused while `running`/`busy`; printer and
+  dispenser closed independently.
+- `ui/panel.py` — single Connect ↔ Disconnect toggle (`_toggle_connect`),
+  label refreshed every poll, disabled while `busy`.
+- Tests 251 → 254 (`test_app` +3). Manual: button read Connect → Disconnect →
+  Connect through Tk's event loop, tracking `Controller.connected`.
+
+## 2026-09-16 (cont.) — C29: opt-in line-numbered streaming + resend buffer; `M420 S1` after `G28` *(backfilled 2026-09-18; commit 6ad4b3e, 10:30)*
+
+- Both flags **opt-in, default off**, unverified on the real firmware:
+  `gcode.use_line_numbers` and `gcode.resend_leveling_after_home`.
+- `gcode/util.py` — `build_numbered_line` (`N<n> text*<xor>`) and
+  `strip_line_number` (unconditional, both links accept either format).
+- `GcodeRunner` — `M110 N0` once, then `_send_numbered` → `_send_and_resolve`
+  with a 64-line `{n: text}` buffer replayed from the requested line on
+  `ResendRequested`, recursively under one lock acquisition; an evicted line
+  is still fatal. With the leveling flag, `M420 S1` is sent right after any
+  streamed `G28` — the automated fix for the 2026-09-15 first-layer root
+  cause. With both flags off `_transmit` is byte-for-byte the old path.
+- Tests 254 → 260 (`test_runner` +6 incl. a 66-line fixture to force
+  eviction; `test_printer_sim` +1). Manual: headless sim run with both flags
+  via a throwaway `config.local.yaml` logged "re-sending M420 S1 after G28".
+
+## 2026-09-16 (cont.) — C30: collision footprint restricted to already-printed layers *(backfilled 2026-09-18; commit c8d4627, 10:36)*
+
+- `_part_collisions` used the whole-file bbox, over-refusing a pocket whenever
+  the part gets wider above the insert layer. New `geometry._printed_footprint
+  (toolpath, printed_top_z, margin)` unions only the extruding segments in
+  layers `0 .. layer_for_z(saved.z)`; falls back to `part_footprint` if none.
+  Always a subset of the whole-file box, so the change can only stop flagging
+  material that does not exist yet. Full per-layer polygon occupancy
+  deliberately scoped out (risk of a subtly wrong implementation being less
+  safe than the bbox) — stays a TODO.
+- Docstrings + CLAUDE.md Known Technical Debt rewritten to the narrower scope.
+- Tests 260 → 262 (`test_geometry` +2: wide-layer-above-insert accepted, real
+  printed collision still refused).
+
+## 2026-09-16 (cont.) — C31: Animate tick stops when idle, 3D redraw throttled, UX pass *(backfilled 2026-09-18; commit ff0e072, 10:49)*
+
+- Owner: "the system feels slow". Two measured causes fixed:
+  `viz/preview.PreviewWindow._tick` no longer reschedules itself unless
+  `self.playing` (0 ticks before Play, flat for 2 s after pausing, verified
+  with a counting wrapper); new `ui.live3d_poll_s` (0.3 s) gates the 3D
+  update + `draw_idle()` to every Nth 2D tick.
+- UX: Pause/Resume as one toggle (`Controller.paused`); human-readable "run
+  finished: N/M lines sent, K magnet insert(s)"; 3D view defaults to Local;
+  Plan dialog seat-Z defaults to the chosen insert layer's height (was the
+  file top); double-wrapped labels fixed in Settings/Z-cal; bigger jog buttons
+  + arrow/Page keys (ignored while a text entry has focus or busy/running).
+- `ttk.Notebook` consolidation of the separate Toplevels explicitly descoped
+  (large rearchitecture, no GUI test coverage) — stays in `TODO.md` with the
+  rest of the screenshot-review items.
+- Tests unchanged at 262 (Tkinter classes are hand-verified through the real
+  event loop by project convention).
+- Docs synced for C26–C31 in each commit: `.CLAUDE/CLAUDE.md`,
+  `project/BUILD_PLAN.md` (Phases 1.13–1.18), `README.md`, `TODO.md`,
+  `project/PROJECT_PLAN.md`. **This log was not updated in those six
+  sessions** — entries above reconstructed on 2026-09-18.
+
 ## 2026-09-18 — Patent disclosure draft refreshed to the C31 state + formatting pass
 
 - Owner asked for a read of the whole project and an update of
@@ -956,3 +1063,40 @@ smoke test.
   log has no entries for the C26–C31 sessions although they are committed
   (`3f49ca4` … `ff0e072`) — offered to backfill from `project/BUILD_PLAN.md`.
 - Docs only; `python -m pytest` 262/262 before and after.
+
+## 2026-09-18 (cont.) — Log backfill for C26–C31; informal patent search written up
+
+- Owner: "yes backfill the log entries for C26-C31. and run the web/patent
+  search and give me a document."
+- Backfilled six dated entries above (one per chunk, marked *backfilled*,
+  with commit hash and time) from `project/BUILD_PLAN.md` Phases 1.13–1.18
+  and `git log`.
+- Ran an informal prior-art / patent search (general web search + the Google
+  Patents record of each candidate: abstract, claim 1, embodiments, status).
+  Written up as **`docs/PRIOR_ART_PATENT_SEARCH.md`** — headline findings,
+  a closest-first patent table with overlap/difference per reference, new
+  non-patent art, exclusions, what was *not* found, agent recommendations,
+  and every source URL.
+- Key results: (1) **Stratasys US 8,070,473 B2 / US 7,917,243 B2 / EP
+  2 231 375 B1** (2008; active to 2028–2029) claim a controller-driven insert
+  placement apparatus on a layer-based printer, incl. embodiments on the
+  extrusion head and a tape+roller that presses inserts during deposition —
+  the closest patent, must be claim-charted, Indian family unknown; (2)
+  **EmGi's Magnet Insertion Tool v1/v2** (2024) is a hand-held magazine +
+  magnetic-tip magnet placer — weakens disclosure novelty item 4 on its own;
+  (3) pause-insert-resume is a claimed step in several recent patents
+  (Honeywell 2024, Univ. of Texas 2020, Markforged 2017), all manual; (4) no
+  hit for a G-code comment sentinel, printer-motion press + lateral shear
+  from a passive magnetic holder, an offset-tool guard from the printed-so-far
+  toolpath, any Indian filing, or any OctoPNP patent. Limits stated in the
+  file: no Espacenet / PATENTSCOPE / InPASS, no citation walk, claims read via
+  page summaries.
+- Disclosure draft updated to match: Q5 patent block, Q6 and Q9 caveats, Q19
+  rewritten intro + rows 6–7, Q27 two new engineering risks (ferromagnetic
+  nozzles; patterned bed-plate re-polarisation, from Hackaday 2026-06-04),
+  agent checklist item to claim-chart the Stratasys family. Risks added to
+  `project/PROJECT_PLAN.md` §7; pointer + nozzle-ferromagnetism bullet in
+  `project/RESEARCH.md`; new file listed in `README.md` and `.CLAUDE/CLAUDE.md`
+  Data Files; `TODO.md` patent item updated.
+- Kept as a repo Markdown file rather than a shared web page on purpose — the
+  material is confidential disclosure content. Docs only; 262/262 tests.
