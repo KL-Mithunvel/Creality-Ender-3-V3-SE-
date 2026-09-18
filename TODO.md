@@ -46,6 +46,15 @@ criteria, risks). Architecture and rules: `.CLAUDE/CLAUDE.md`. Keep all three in
 
 ## Done
 
+- [x] Patent draft refresh (2026-09-18): `docs/INVENTION_DISCLOSURE_DRAFT.md` brought
+      to the C31 state — test counts 225/245 -> 262; Q7 gained B12-B15 (emergency stop,
+      safe cancel, run transcript, opt-in numbered streaming) and B4/B5/B7 reworded for the
+      printed-so-far footprint and the insert-phase live view; Q8 step 5 + a new "if
+      something goes wrong" step; Q9 item 7 / Q18 claim 7 sharpened to the printed-so-far
+      footprint (C30); Q11 collision-check variants; Q12 notes the software can already
+      export the method figures; Q21 split into four tables with the guard and comms
+      parameters added; formatting pass — metadata table, placeholder legend, contents
+      table, `## Q<n>.` headings, closing open-items checklist.
 - [x] **Phase 1.18 — C31** (`project/BUILD_PLAN.md`) — GUI performance fixes (the Animate
       window's `_tick` loop now stops rescheduling itself the moment playback ends, instead
       of ticking every 40 ms for as long as the window is open; the main panel's 3D redraw

@@ -914,3 +914,45 @@ smoke test.
 - Still open from the review: safe-cancel routine, insert-phase live view,
   window/performance consolidation, UX pass, hardware bench-test of `M112`
   (`EMERGENCY_PARSER` on the stock board unverified).
+
+## 2026-09-18 — Patent disclosure draft refreshed to the C31 state + formatting pass
+
+- Owner asked for a read of the whole project and an update of
+  `docs/INVENTION_DISCLOSURE_DRAFT.md` — add anything missing, then format it
+  properly. Proposed the change list first (PROJ_STARTER rule), owner approved.
+- Gap found: the draft's last refresh was `0de34e1` (2026-09-16, between C24 and
+  C25); C25 was partly reflected, C26–C31 not at all, and the test count was
+  stale in four places (225/245 vs. 262 — re-ran `python -m pytest`, 262 pass).
+  Re-extracted the 27 questions from the K&K `.docx` (zipfile + regex, no
+  python-docx in the venv) to confirm the draft still mirrors the form; checked
+  the Q14 per-phase G-code table line by line against
+  `sequences/insert_magnet.py` — still exact.
+- Content changes: Q2 solution mentions the printed-so-far damage guard; Q3 two
+  extra search terms; Q5 host-software line notes e-stop/cancel/progress viewer
+  as prior art; Q7 rewritten as two tables, new B12 (emergency stop), B13 (safe
+  cancel), B14 (run transcript), B15 (opt-in numbered/checksummed streaming +
+  `M420 S1` after `G28`), B4/B5/B7 reworded (C26/C30); Q8 step 5 restricted to
+  printed layers, step 3 notes the no-polling live view, new step 9 on failure
+  paths; Q9 item 7 and Q18 claim 7 sharpened to the printed-so-far footprint,
+  item 9 / claim 9 gained the per-phase target reporting, plus an explicit
+  "not claimed as novel" line for the standard host features; Q10 host-side
+  safety bullet; Q11 collision-check variants; Q12 notes `main.py --preview`
+  and the panel can already export the method figures; Q14 validation list and
+  a C30 note on the worked example; Q15 test coverage list updated, no hardware
+  since 2026-09-15 stated; Q16 "no change known as of 2026-09-18" with a
+  `[VERIFY]`; Q17/Q26/Q27 to C31; Q18 dependent claims gained bbox-vs-polygon
+  footprint, shear sampling, e-stop-releases-prompt; Q19 row 5 for host
+  software; Q21 split into mechanical / insert motion / damage guard /
+  communication tables with clearance, margin, shear samples, park, travel,
+  prime, ack timeout, resend buffer, Uno settle added.
+- Formatting: metadata table (form, status, last updated, sources), placeholder
+  legend, contents table linking Q1–Q27, headings normalised to `## Q<n>.`,
+  Q22 company slots 1–5 as on the form, closing "Open items checklist" that
+  gathers every placeholder by owner (inventors vs. agent).
+- Deliberately not done: no web/patent search (offered as optional, not taken
+  up); repo-privacy for Q16 not re-verified by me — owner's 2026-09-16 word
+  stands, flagged `[VERIFY]`.
+- Companion files: this entry; `TODO.md` Done line. Noted for the owner: this
+  log has no entries for the C26–C31 sessions although they are committed
+  (`3f49ca4` … `ff0e072`) — offered to backfill from `project/BUILD_PLAN.md`.
+- Docs only; `python -m pytest` 262/262 before and after.
